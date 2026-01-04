@@ -29,15 +29,36 @@ router = Router()
 
 # ===== ПРОВЕРКА ПОДПИСКИ НА КАНАЛ =====
 
-async def check_subscription(bot, user_id: int) -> bool:
+async def check_subscription(bot, user_id: int, skip_cache: bool = False) -> bool:
     """
     Проверяет подписку пользователя на обязательный канал.
+    Сначала проверяет кэш в БД, затем Telegram API если нужно.
     Возвращает True если подписан, False если нет.
+    
+    Args:
+        bot: Telegram Bot instance
+        user_id: ID пользователя
+        skip_cache: Если True, пропустить проверку кэша и сразу идти в Telegram API
     """
+    # 1. Сначала проверяем кэш в базе данных (если не указано пропустить)
+    if not skip_cache:
+        is_cached = await db.is_subscription_verified(user_id)
+        if is_cached:
+            logger.debug(f"Subscription verified from cache for user {user_id}")
+            return True
+    
+    # 2. Проверяем через Telegram API
     CHANNEL_ID = keyboards.SUBSCRIPTION_CHANNEL_ID
     try:
         member = await bot.get_chat_member(CHANNEL_ID, user_id)
-        return member.status in ['member', 'administrator', 'creator']
+        is_subscribed = member.status in ['member', 'administrator', 'creator']
+        
+        # 3. Если подписан - сохраняем в кэш
+        if is_subscribed:
+            await db.set_subscription_verified(user_id, True)
+            logger.info(f"Subscription verified and cached for user {user_id}")
+        
+        return is_subscribed
     except Exception as e:
         logger.warning(f"Subscription check failed for user {user_id}: {e}")
         return False
