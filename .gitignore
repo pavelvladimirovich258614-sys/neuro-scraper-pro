@@ -57,3 +57,7 @@ Thumbs.db
 reports/
 *.xlsx
 *.txt
+
+# Windows problematic files
+nul
+]
