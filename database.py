@@ -87,6 +87,12 @@ class Database:
                 await db.execute("ALTER TABLE users ADD COLUMN referral_bonus_given BOOLEAN DEFAULT 0")
             except:
                 pass  # Колонка уже существует
+            
+            # Миграция: добавляем поле subscription_verified для кэширования проверки подписки
+            try:
+                await db.execute("ALTER TABLE users ADD COLUMN subscription_verified BOOLEAN DEFAULT 0")
+            except:
+                pass  # Колонка уже существует
 
             # User sessions table (for Telethon accounts)
             await db.execute("""
@@ -554,6 +560,40 @@ class Database:
         except Exception as e:
             logger.error(f"Error checking access status: {e}")
             return False  # Default to closed on error
+
+    # ===== КЭШИРОВАНИЕ ПРОВЕРКИ ПОДПИСКИ =====
+    
+    async def is_subscription_verified(self, user_id: int) -> bool:
+        """Проверить, подтверждена ли подписка пользователя (кэш)"""
+        try:
+            async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+                async with db.execute(
+                    "SELECT subscription_verified FROM users WHERE user_id = ?",
+                    (user_id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    if row:
+                        return bool(row[0])
+                    return False
+        except Exception as e:
+            logger.error(f"Error checking subscription status: {e}")
+            return False
+    
+    async def set_subscription_verified(self, user_id: int, verified: bool = True) -> bool:
+        """Сохранить статус подтверждения подписки в БД"""
+        try:
+            async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+                await db.execute("""
+                    UPDATE users
+                    SET subscription_verified = ?
+                    WHERE user_id = ?
+                """, (1 if verified else 0, user_id))
+                await db.commit()
+                logger.info(f"Subscription verified status set to {verified} for user {user_id}")
+                return True
+        except Exception as e:
+            logger.error(f"Error setting subscription status: {e}")
+            return False
 
     # ===== РЕФЕРАЛЬНАЯ СИСТЕМА =====
     
