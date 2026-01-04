@@ -9,6 +9,49 @@ from typing import List, Dict, Any
 import config
 
 
+# ===== ПРОВЕРКА ПОДПИСКИ НА КАНАЛ =====
+
+# Константы для проверки подписки
+SUBSCRIPTION_CHANNEL_ID = -1002443306268
+SUBSCRIPTION_CHANNEL_LINK = "https://t.me/Novopoltsev_Pavel"
+
+
+def get_subscription_check_menu() -> InlineKeyboardMarkup:
+    """Меню проверки подписки на канал"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="✅ Проверить подписку",
+            callback_data="check_subscription"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="📢 Подписаться",
+            url=SUBSCRIPTION_CHANNEL_LINK
+        )
+    )
+    return builder.as_markup()
+
+
+def get_not_subscribed_menu() -> InlineKeyboardMarkup:
+    """Меню когда пользователь не подписан"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="📢 Подписаться",
+            url=SUBSCRIPTION_CHANNEL_LINK
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="🔄 Проверить снова",
+            callback_data="check_subscription"
+        )
+    )
+    return builder.as_markup()
+
+
 def get_main_menu() -> InlineKeyboardMarkup:
     """Главное меню бота"""
     builder = InlineKeyboardBuilder()

@@ -27,6 +27,22 @@ PROGRESS_UPDATE_INTERVAL = 3.0
 router = Router()
 
 
+# ===== ПРОВЕРКА ПОДПИСКИ НА КАНАЛ =====
+
+async def check_subscription(bot, user_id: int) -> bool:
+    """
+    Проверяет подписку пользователя на обязательный канал.
+    Возвращает True если подписан, False если нет.
+    """
+    CHANNEL_ID = keyboards.SUBSCRIPTION_CHANNEL_ID
+    try:
+        member = await bot.get_chat_member(CHANNEL_ID, user_id)
+        return member.status in ['member', 'administrator', 'creator']
+    except Exception as e:
+        logger.warning(f"Subscription check failed for user {user_id}: {e}")
+        return False
+
+
 # FSM States
 class AddAccountStates(StatesGroup):
     """Состояния для добавления аккаунта"""
@@ -110,7 +126,25 @@ async def cmd_start(message: Message, state: FSMContext):
     else:
         await db.update_user_activity(user_id)
 
-    # Приветственное сообщение
+    # ===== ПРОВЕРКА ПОДПИСКИ НА КАНАЛ =====
+    is_subscribed = await check_subscription(message.bot, user_id)
+    
+    if not is_subscribed:
+        # Пользователь НЕ подписан - показываем сообщение с просьбой подписаться
+        user_name = first_name or username or "Пользователь"
+        subscribe_text = f"""
+👋 <b>{user_name}</b>, для того чтобы пользоваться ботом подпишись на канал
+
+📢 Подпишитесь на наш канал, чтобы получить доступ ко всем функциям бота.
+"""
+        await message.answer(
+            subscribe_text,
+            reply_markup=keyboards.get_subscription_check_menu(),
+            parse_mode="HTML"
+        )
+        return  # Прерываем выполнение, не показываем главное меню
+
+    # ===== ПОЛЬЗОВАТЕЛЬ ПОДПИСАН - показываем главное меню =====
     welcome_text = f"""
 👋 <b>Добро пожаловать в NeuroScraper Pro!</b>
 
@@ -138,6 +172,54 @@ async def cmd_start(message: Message, state: FSMContext):
         reply_markup=keyboards.get_main_menu(),
         parse_mode="HTML"
     )
+
+
+# ===== CALLBACK ДЛЯ ПРОВЕРКИ ПОДПИСКИ =====
+
+@router.callback_query(F.data == "check_subscription")
+async def check_subscription_callback(callback: CallbackQuery):
+    """Обработчик кнопки 'Проверить подписку'"""
+    user_id = callback.from_user.id
+    
+    is_subscribed = await check_subscription(callback.bot, user_id)
+    
+    if is_subscribed:
+        # Пользователь подписан - показываем главное меню
+        await callback.message.edit_text(
+            f"""
+👋 <b>Добро пожаловать в NeuroScraper Pro!</b>
+
+🔥 <b>Профессиональный инструмент для парсинга аудитории Telegram</b>
+
+<b>Возможности бота:</b>
+
+📊 <b>Парсинг каналов</b> — комментаторы из постов
+👥 <b>Парсинг чатов</b> — участники и активные
+🔒 <b>Мои Чаты</b> — парсинг закрытых групп
+📈 <b>Умная выгрузка</b> — 4 файла (админы, премиум, обычные, полный отчёт)
+
+⏱ <b>Фильтры:</b> день / неделя / месяц / 3 месяца
+
+🔐 <b>Многоаккаунтность</b> — добавляйте свои Telegram аккаунты
+
+💎 <b>Ваш лимит:</b> {config.FREE_PARSING_LIMIT} бесплатных парсингов
+👥 <b>Реферальная программа:</b> +{config.REFERRAL_BONUS} парсинга за друга!
+
+Выберите действие в меню ниже:
+""",
+            reply_markup=keyboards.get_main_menu(),
+            parse_mode="HTML"
+        )
+        await callback.answer("✅ Подписка подтверждена!")
+    else:
+        # Пользователь НЕ подписан
+        await callback.message.edit_text(
+            "❌ <b>К сожалению вы не подписаны на канал</b>\n\n"
+            "Подпишитесь на канал и нажмите кнопку проверки снова.",
+            reply_markup=keyboards.get_not_subscribed_menu(),
+            parse_mode="HTML"
+        )
+        await callback.answer("❌ Вы не подписаны на канал", show_alert=True)
 
 
 # Главное меню
