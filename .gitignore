@@ -5,6 +5,12 @@
 *.db
 *.sqlite
 *.sqlite3
+*.db-wal
+*.db-shm
+*.db-journal
+
+# Прочий мусор
+TREE.txt
 
 # Session files
 sessions/
