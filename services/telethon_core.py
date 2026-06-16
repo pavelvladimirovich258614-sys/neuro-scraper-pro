@@ -45,10 +45,9 @@ from utils.link_parser import parse_post_link
 
 logger = logging.getLogger(__name__)
 
-# Максимальное время ожидания FloodWait (секунды)
-MAX_FLOOD_WAIT = 300  # 5 минут
-# Количество попыток переподключения
-MAX_RECONNECT_ATTEMPTS = 3
+# Параметры надёжности берём из config (единый источник магических чисел)
+MAX_FLOOD_WAIT = config.MAX_FLOOD_WAIT
+MAX_RECONNECT_ATTEMPTS = config.MAX_RECONNECT_ATTEMPTS
 
 
 @dataclass
@@ -461,7 +460,7 @@ class TelethonCore:
                 logger.warning(f"Could not fetch admins: {e}")
 
             # ОПТИМИЗАЦИЯ: Батчинг - обрабатываем сообщения пачками
-            BATCH_SIZE = 50
+            BATCH_SIZE = config.PARSING_BATCH_SIZE
             batch_count = 0
 
             # Итерируемся по постам канала
@@ -677,7 +676,7 @@ class TelethonCore:
                 try:
                     # Батчинг: собираем комментарии пачками без delay после каждого
                     batch_count = 0
-                    BATCH_SIZE = 50
+                    BATCH_SIZE = config.PARSING_BATCH_SIZE
 
                     async for comment in client.iter_messages(
                         entity,
@@ -809,7 +808,7 @@ class TelethonCore:
                 logger.warning(f"Could not fetch admins: {e}")
 
             # ОПТИМИЗАЦИЯ: Батчинг - обрабатываем сообщения пачками
-            BATCH_SIZE = 50
+            BATCH_SIZE = config.PARSING_BATCH_SIZE
             batch_count = 0
 
             # Итерируемся по сообщениям

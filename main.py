@@ -15,7 +15,7 @@ from aiogram.enums import ParseMode
 
 import config
 from database import db
-from handlers import user_handlers, admin_handlers
+from handlers import user_handlers, admin_handlers, help as help_handlers, referral as referral_handlers
 from middlewares.subscription_middleware import SubscriptionMiddleware
 from middlewares.throttle_middleware import CallbackThrottleMiddleware
 from storage import SQLiteStorage
@@ -161,6 +161,8 @@ async def main():
 
     # Регистрация роутеров (admin первый - приоритет для админских команд)
     dp.include_router(admin_handlers.router)
+    dp.include_router(help_handlers.router)
+    dp.include_router(referral_handlers.router)
     dp.include_router(user_handlers.router)
 
     # Throttle от двойных нажатий (раньше проверки подписки — гасим дубли первыми)

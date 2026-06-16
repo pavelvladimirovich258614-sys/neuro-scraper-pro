@@ -53,6 +53,14 @@ REFERRAL_BONUS = 2  # Бонус за приглашённого друга
 # Parsing Configuration
 PARSING_DELAY_MIN = 0.5  # Minimum delay between requests (seconds)
 PARSING_DELAY_MAX = 2.0  # Maximum delay between requests (seconds)
+PARSING_BATCH_SIZE = 50  # Размер пачки сообщений между паузами (антидетект)
+
+# Telethon reliability
+MAX_FLOOD_WAIT = 300        # Макс. ожидание FloodWait (сек), дольше — прерываем
+MAX_RECONNECT_ATTEMPTS = 3  # Попытки переподключения клиента
+
+# UI
+PROGRESS_UPDATE_INTERVAL = 3.0  # Мин. интервал обновления прогресс-бара (сек)
 
 # Time filters (days)
 TIME_FILTERS = {
