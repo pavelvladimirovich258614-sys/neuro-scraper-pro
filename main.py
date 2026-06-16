@@ -66,7 +66,35 @@ async def daily_backup_task():
             await asyncio.sleep(3600)  # Подождать час при ошибке
 
 
-async def on_startup():
+async def setup_bot_commands(bot: Bot):
+    """Команды в меню Telegram (кнопка «Меню» слева от поля ввода)."""
+    from aiogram.types import (
+        BotCommand, BotCommandScopeDefault, BotCommandScopeChat
+    )
+
+    # Команды для всех пользователей
+    user_commands = [
+        BotCommand(command="start", description="🏠 Главное меню"),
+        BotCommand(command="help", description="❓ Помощь"),
+        BotCommand(command="id", description="🆔 Мой Telegram ID"),
+        BotCommand(command="cancel", description="❌ Отменить действие"),
+    ]
+    await bot.set_my_commands(user_commands, scope=BotCommandScopeDefault())
+
+    # Расширенный набор для администратора (добавляется /admin)
+    admin_commands = [BotCommand(command="admin", description="👑 Админ-панель")] + user_commands
+    try:
+        await bot.set_my_commands(
+            admin_commands,
+            scope=BotCommandScopeChat(chat_id=config.ADMIN_ID)
+        )
+    except Exception as e:
+        logger.warning(f"Could not set admin commands: {e}")
+
+    logger.info("Bot commands menu configured")
+
+
+async def on_startup(bot: Bot):
     """Действия при запуске бота"""
     logger.info("Starting NeuroScraper Pro Bot...")
 
@@ -79,7 +107,10 @@ async def on_startup():
     Path("reports").mkdir(exist_ok=True)
     Path("backups").mkdir(exist_ok=True)
     logger.info("Directories created")
-    
+
+    # Команды в меню Telegram
+    await setup_bot_commands(bot)
+
     # Запуск фоновой задачи бэкапа
     backup_task = asyncio.create_task(daily_backup_task())
     _background_tasks.add(backup_task)

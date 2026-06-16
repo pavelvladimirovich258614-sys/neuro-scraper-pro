@@ -98,22 +98,12 @@ def get_main_menu() -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(
-            text="💎 Мой лимит",
-            callback_data="my_limit"
-        ),
-        InlineKeyboardButton(
             text="👥 Рефералы",
             callback_data="show_referral"
-        )
-    )
-    builder.row(
+        ),
         InlineKeyboardButton(
             text="❓ Помощь",
             callback_data="help"
-        ),
-        InlineKeyboardButton(
-            text="💬 Поддержка",
-            url=config.SUPPORT_LINK
         )
     )
     return builder.as_markup()

@@ -22,8 +22,11 @@ async def db(tmp_path):
 
 
 # ===== ЛИМИТЫ =====
+# По умолчанию бот бесплатный (доступ открыт), поэтому для проверки механики
+# лимитов в этих тестах доступ явно закрывается.
 
 async def test_new_user_gets_free_limit(db):
+    await db.set_access_open(False)
     info = await db.check_limit(12345)
     assert info["has_limit"] is True
     assert info["remaining"] == config.FREE_PARSING_LIMIT
@@ -31,6 +34,7 @@ async def test_new_user_gets_free_limit(db):
 
 
 async def test_decrease_limit_until_exhausted(db):
+    await db.set_access_open(False)
     uid = 555
     await db.create_user(uid)
     for _ in range(config.FREE_PARSING_LIMIT):
@@ -60,6 +64,7 @@ async def test_admin_unlimited(db):
 
 
 async def test_reset_limit(db):
+    await db.set_access_open(False)
     uid = 888
     await db.create_user(uid)
     await db.decrease_limit(uid)
@@ -70,7 +75,13 @@ async def test_reset_limit(db):
 
 # ===== ГЛОБАЛЬНЫЙ ДОСТУП =====
 
-async def test_access_closed_by_default(db):
+async def test_access_open_by_default(db):
+    # Бот бесплатный: без явной настройки доступ открыт
+    assert await db.is_access_open() is True
+
+
+async def test_access_can_be_closed(db):
+    await db.set_access_open(False)
     assert await db.is_access_open() is False
 
 
@@ -86,6 +97,7 @@ async def test_access_open_makes_unlimited(db):
 # ===== РЕФЕРАЛЫ =====
 
 async def test_referral_bonus_idempotent(db):
+    await db.set_access_open(False)
     referrer, invited = 100, 200
     await db.create_user(referrer)
     # Исчерпываем лимит реферера, чтобы увидеть эффект бонуса

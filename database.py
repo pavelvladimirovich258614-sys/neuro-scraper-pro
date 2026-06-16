@@ -554,10 +554,11 @@ class Database:
                     row = await cursor.fetchone()
                     if row:
                         return row[0] == '1'
-                    return False  # Default: access is closed (3 trial parsings)
+                    # Default: доступ ОТКРЫТ — бот бесплатный (доступ за подписку на канал)
+                    return True
         except Exception as e:
             logger.error(f"Error checking access status: {e}")
-            return False  # Default to closed on error
+            return True  # При ошибке не блокируем (бот бесплатный)
 
     # ===== КЭШИРОВАНИЕ ПРОВЕРКИ ПОДПИСКИ =====
 

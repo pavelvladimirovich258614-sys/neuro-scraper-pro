@@ -6,6 +6,7 @@ Handles all user interactions, FSM states, and parsing logic
 import logging
 import asyncio
 import time
+import re
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, FSInputFile
 from aiogram.filters import Command, StateFilter
@@ -294,19 +295,25 @@ async def start_add_account(callback: CallbackQuery, state: FSMContext):
 @router.message(AddAccountStates.waiting_for_phone)
 async def process_phone(message: Message, state: FSMContext):
     """Обработка введенного телефона"""
-    phone = message.text.strip()
     user_id = message.from_user.id
 
+    # Нормализуем номер: оставляем только цифры (убираем пробелы, дефисы,
+    # скобки, +). Иначе имя файла сессии получало пробелы и аккаунт не
+    # авторизовывался.
+    digits = re.sub(r"\D", "", message.text or "")
+
     # Валидация номера
-    if not phone.startswith('+') or len(phone) < 10:
+    if len(digits) < 10:
         await message.answer(
             "❌ Неверный формат номера!\n\nИспользуйте формат: +79991234567",
             reply_markup=keyboards.get_cancel_button()
         )
         return
 
-    # Генерируем имя сессии
-    session_name = f"user_{user_id}_{phone.replace('+', '')}"
+    phone = "+" + digits
+
+    # Генерируем имя сессии (только цифры — без пробелов и спецсимволов)
+    session_name = f"user_{user_id}_{digits}"
 
     # Отправляем код (показываем статус)
     wait_msg = await message.answer("⏳ Отправляем код...")

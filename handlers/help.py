@@ -9,50 +9,10 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 
 import keyboards
-import config
-from database import db
 
 logger = logging.getLogger(__name__)
 
 router = Router()
-
-
-# Мой лимит
-@router.callback_query(F.data == "my_limit")
-async def show_limit(callback: CallbackQuery):
-    """Показать информацию о лимите"""
-    user_id = callback.from_user.id
-    limit_info = await db.check_limit(user_id)
-    ref_stats = await db.get_referral_stats(user_id)
-
-    if limit_info["is_premium"]:
-        text = """
-💎 <b>Премиум подписка активна!</b>
-
-У вас безлимитный доступ ко всем функциям бота.
-"""
-    else:
-        remaining = limit_info["remaining"]
-        text = f"""
-📊 <b>Информация о вашем лимите:</b>
-
-Осталось парсингов: <b>{remaining}</b> из {config.FREE_PARSING_LIMIT}
-
-<b>Способы получить больше:</b>
-💎 Купить премиум подписку
-👥 Пригласить друга (+{config.REFERRAL_BONUS} парсинга)
-
-<b>Ваши рефералы:</b>
-• Приглашено: {ref_stats['invited_count']} чел.
-• Заработано: +{ref_stats['total_bonus']} парсингов
-"""
-
-    await callback.message.edit_text(
-        text,
-        reply_markup=keyboards.get_back_button(),
-        parse_mode="HTML"
-    )
-    await callback.answer()
 
 
 # Помощь
