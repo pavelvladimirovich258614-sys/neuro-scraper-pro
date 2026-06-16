@@ -36,7 +36,8 @@ from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.types import (
     ChannelParticipantsSearch,
     InputPeerEmpty,
-    DialogFilter
+    DialogFilter,
+    PeerChannel
 )
 
 import config
@@ -369,6 +370,39 @@ class TelethonCore:
         logger.error(f"[Fallback] All sessions failed!")
         return None, session_name
 
+    async def _resolve_private_channel(self, client: TelegramClient, channel_id: int):
+        """Надёжно получить entity приватного канала по числовому ID из ссылки t.me/c/<id>/...
+
+        get_entity по числовому ID часто падает, если аккаунт ещё не «видел»
+        канал в текущей сессии. Поэтому:
+          1) пробуем PeerChannel(channel_id);
+          2) при неудаче прогреваем кэш диалогов (iter_dialogs) и ищем канал там;
+          3) при неудаче — последняя попытка PeerChannel.
+        Возвращает entity или None.
+        """
+        # Шаг 1: прямой резолв
+        try:
+            return await client.get_entity(PeerChannel(channel_id))
+        except (ValueError, errors.ChannelInvalidError, errors.ChannelPrivateError) as e:
+            logger.debug(f"[SinglePost] Direct resolve failed for {channel_id}: {e}")
+
+        # Шаг 2: прогрев кэша диалогами и поиск нужного канала
+        try:
+            async for dialog in client.iter_dialogs():
+                ent = dialog.entity
+                if getattr(ent, "id", None) == channel_id:
+                    logger.debug(f"[SinglePost] Channel {channel_id} found via dialogs")
+                    return ent
+        except Exception as e:
+            logger.debug(f"[SinglePost] Dialog warm-up failed: {e}")
+
+        # Шаг 3: повторная попытка после прогрева
+        try:
+            return await client.get_entity(PeerChannel(channel_id))
+        except Exception as e:
+            logger.warning(f"[SinglePost] Could not resolve private channel {channel_id}: {e}")
+            return None
+
     async def _parse_channel_comments(
         self,
         session_name: str,
@@ -593,11 +627,14 @@ class TelethonCore:
                 if parts[1] == "c" and len(parts) >= 4:
                     channel_id = int(parts[2])
                     message_id = int(parts[3].split("?")[0])  # Убираем query params
-                    # Для приватных каналов нужен специальный формат ID
-                    # Telegram использует -100 + channel_id для супергрупп/каналов
-                    full_channel_id = int(f"-100{channel_id}")
-                    logger.info(f"[SinglePost] Private channel ID: {channel_id} -> {full_channel_id}, msg: {message_id}")
-                    entity = await client.get_entity(full_channel_id)
+                    logger.debug(f"[SinglePost] Private channel id={channel_id}, msg={message_id}")
+                    entity = await self._resolve_private_channel(client, channel_id)
+                    if entity is None:
+                        result.errors.append(
+                            "Не удалось открыть приватный канал. Убедитесь, что "
+                            "аккаунт, которым вы парсите, состоит в этом канале."
+                        )
+                        return result
 
                 # Формат: t.me/channel_username/123 (публичный канал)
                 else:
