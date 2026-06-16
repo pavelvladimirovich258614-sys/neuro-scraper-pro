@@ -34,6 +34,9 @@ SUPPORT_LINK = os.getenv("SUPPORT_LINK", "https://t.me/NeuroCash_Support_Bot")
 # Database Configuration
 DATABASE_PATH = BASE_DIR / os.getenv("DATABASE_PATH", "database.db")
 
+# FSM Storage (персистентное хранилище состояний — переживает рестарт)
+FSM_DB_PATH = BASE_DIR / os.getenv("FSM_DB_PATH", "fsm.db")
+
 # Session Storage
 SESSIONS_DIR = BASE_DIR / os.getenv("SESSIONS_DIR", "sessions")
 SESSIONS_DIR.mkdir(exist_ok=True)

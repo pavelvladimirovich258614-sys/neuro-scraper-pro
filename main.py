@@ -12,11 +12,12 @@ from datetime import datetime, time as dt_time
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
 
 import config
 from database import db
 from handlers import user_handlers, admin_handlers
+from middlewares.subscription_middleware import SubscriptionMiddleware
+from storage import SQLiteStorage
 
 # Настройка логирования
 logging.basicConfig(
@@ -111,13 +112,17 @@ async def main():
         )
     )
 
-    # FSM хранилище
-    storage = MemoryStorage()
+    # FSM хранилище — персистентное (переживает рестарт бота)
+    storage = SQLiteStorage(config.FSM_DB_PATH)
     dp = Dispatcher(storage=storage)
 
     # Регистрация роутеров (admin первый - приоритет для админских команд)
     dp.include_router(admin_handlers.router)
     dp.include_router(user_handlers.router)
+
+    # Регистрация middleware проверки подписки на канал
+    dp.message.middleware(SubscriptionMiddleware())
+    dp.callback_query.middleware(SubscriptionMiddleware())
 
     # Регистрация startup/shutdown функций
     dp.startup.register(on_startup)
@@ -133,6 +138,7 @@ async def main():
     except Exception as e:
         logger.error(f"Error during polling: {e}", exc_info=True)
     finally:
+        await storage.close()
         await bot.session.close()
 
 
