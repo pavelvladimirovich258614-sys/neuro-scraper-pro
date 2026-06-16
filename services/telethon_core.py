@@ -102,6 +102,11 @@ class TelethonCore:
             self._session_locks[session_name] = lock
         return lock
 
+    def is_session_busy(self, session_name: str) -> bool:
+        """Занята ли сессия другой операцией прямо сейчас (для индикатора очереди)."""
+        lock = self._session_locks.get(session_name)
+        return lock is not None and lock.locked()
+
     # ===== ПУБЛИЧНЫЕ ОБЁРТКИ С БЛОКИРОВКОЙ СЕССИИ =====
     # Каждая операция, работающая с TelegramClient, берёт блокировку по имени
     # сессии на всё время выполнения. Конкурентные вызовы по одной сессии

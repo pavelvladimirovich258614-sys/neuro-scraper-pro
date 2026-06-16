@@ -17,6 +17,7 @@ import config
 from database import db
 from handlers import user_handlers, admin_handlers
 from middlewares.subscription_middleware import SubscriptionMiddleware
+from middlewares.throttle_middleware import CallbackThrottleMiddleware
 from storage import SQLiteStorage
 
 # Настройка логирования
@@ -90,15 +91,57 @@ async def on_startup():
 async def on_shutdown():
     """Действия при остановке бота"""
     logger.info("Shutting down NeuroScraper Pro Bot...")
-    
+
+    # Graceful shutdown: даём активным парсингам завершиться (до 30 секунд)
+    from handlers.user_handlers import _active_parsings
+    waited = 0.0
+    while _active_parsings and waited < 30.0:
+        logger.info(f"Waiting for {len(_active_parsings)} active parsing(s) to finish...")
+        await asyncio.sleep(1.0)
+        waited += 1.0
+    if _active_parsings:
+        logger.warning(f"Forced shutdown with {len(_active_parsings)} parsing(s) still active")
+
     # Отменяем фоновые задачи
     for task in _background_tasks:
         task.cancel()
-    
+
     # Закрываем соединение с БД
     await db.close()
-    
+
     logger.info("Bot stopped")
+
+
+async def on_error(event, bot: Bot = None):
+    """Глобальный обработчик необработанных ошибок.
+
+    Логирует исключение и старается вежливо уведомить пользователя, чтобы
+    бот не «зависал» молча. event — aiogram ErrorEvent.
+    """
+    logger.error(f"Unhandled exception: {event.exception}", exc_info=event.exception)
+
+    update = getattr(event, "update", None)
+    if update is None:
+        return True
+
+    text = "⚠️ Произошла ошибка. Попробуйте ещё раз или вернитесь в меню."
+    try:
+        from keyboards import get_main_menu
+        if getattr(update, "callback_query", None):
+            cq = update.callback_query
+            try:
+                await cq.answer("⚠️ Произошла ошибка", show_alert=True)
+            except Exception:
+                pass
+            if cq.message:
+                await cq.message.answer(text, reply_markup=get_main_menu())
+        elif getattr(update, "message", None):
+            await update.message.answer(text, reply_markup=get_main_menu())
+    except Exception as notify_err:
+        logger.debug(f"Could not notify user about error: {notify_err}")
+
+    # Возвращаем True — ошибка обработана, бот продолжает работу
+    return True
 
 
 async def main():
@@ -120,9 +163,15 @@ async def main():
     dp.include_router(admin_handlers.router)
     dp.include_router(user_handlers.router)
 
+    # Throttle от двойных нажатий (раньше проверки подписки — гасим дубли первыми)
+    dp.callback_query.middleware(CallbackThrottleMiddleware())
+
     # Регистрация middleware проверки подписки на канал
     dp.message.middleware(SubscriptionMiddleware())
     dp.callback_query.middleware(SubscriptionMiddleware())
+
+    # Регистрация глобального обработчика ошибок
+    dp.errors.register(on_error)
 
     # Регистрация startup/shutdown функций
     dp.startup.register(on_startup)

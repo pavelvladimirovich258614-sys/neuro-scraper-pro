@@ -1331,11 +1331,16 @@ async def start_parsing_with_settings(callback: CallbackQuery, state: FSMContext
         return
 
     _active_parsings.add(user_id)
-    progress_msg = await callback.message.edit_text(
-        "🚀 <b>Начинаем парсинг...</b>\n\n"
-        "⏳ Подготовка...",
-        parse_mode="HTML"
-    )
+    # Индикатор очереди: если сессия занята другим парсингом — предупреждаем
+    if telethon_core.is_session_busy(session_name):
+        prep_text = (
+            "⏳ <b>В очереди...</b>\n\n"
+            "Эта сессия сейчас занята другим парсингом. "
+            "Ваш запустится автоматически, как только освободится."
+        )
+    else:
+        prep_text = "🚀 <b>Начинаем парсинг...</b>\n\n⏳ Подготовка..."
+    progress_msg = await callback.message.edit_text(prep_text, parse_mode="HTML")
 
     last_update_time = [0.0]
     last_text = [""]
@@ -1879,11 +1884,16 @@ async def start_parsing(callback: CallbackQuery, state: FSMContext):
     )
 
     _active_parsings.add(user_id)
-    progress_msg = await callback.message.edit_text(
-        "🚀 <b>Начинаем парсинг...</b>\n\n"
-        "⏳ Подготовка...",
-        parse_mode="HTML"
-    )
+    # Индикатор очереди: если сессия занята другим парсингом — предупреждаем
+    if telethon_core.is_session_busy(session_name):
+        prep_text = (
+            "⏳ <b>В очереди...</b>\n\n"
+            "Эта сессия сейчас занята другим парсингом. "
+            "Ваш запустится автоматически, как только освободится."
+        )
+    else:
+        prep_text = "🚀 <b>Начинаем парсинг...</b>\n\n⏳ Подготовка..."
+    progress_msg = await callback.message.edit_text(prep_text, parse_mode="HTML")
     await callback.answer()
 
     # Состояние для throttling обновлений прогресса
@@ -2132,3 +2142,14 @@ async def cancel_action(callback: CallbackQuery, state: FSMContext):
         reply_markup=keyboards.get_main_menu()
     )
     await callback.answer()
+
+
+# Команда /cancel — выход из любого FSM-сценария
+@router.message(Command("cancel"))
+async def cmd_cancel(message: Message, state: FSMContext):
+    """Сбросить текущий сценарий и вернуться в меню."""
+    await state.clear()
+    await message.answer(
+        "❌ Действие отменено. Вы в главном меню.",
+        reply_markup=keyboards.get_main_menu()
+    )
