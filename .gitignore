@@ -53,11 +53,10 @@ Thumbs.db
 # Logs
 *.log
 
-# Reports (generated files)
+# Reports (generated files) — лежат в reports/, поэтому игнорируем только её.
+# НЕ игнорируем *.txt глобально, иначе пропадает requirements.txt
 reports/
-*.xlsx
-*.txt
+backups/
 
 # Windows problematic files
 nul
-]
