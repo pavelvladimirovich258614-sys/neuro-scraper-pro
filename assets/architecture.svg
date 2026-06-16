@@ -1,0 +1,113 @@
+<svg width="1200" height="560" viewBox="0 0 1200 560" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Архитектура NeuroScraper Pro">
+  <defs>
+    <linearGradient id="abg" x1="0" y1="0" x2="0" y2="560" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0b1020"/>
+      <stop offset="1" stop-color="#0f1530"/>
+    </linearGradient>
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="560" rx="18" fill="url(#abg)"/>
+  <text x="40" y="52" font-family="Segoe UI, Arial, sans-serif" font-size="26" font-weight="800" fill="#f8fafc">Архитектура и поток данных</text>
+  <rect x="40" y="64" width="70" height="4" rx="2" fill="url(#acc)"/>
+
+  <!-- helper styles via groups -->
+  <g font-family="Segoe UI, Arial, sans-serif">
+
+    <!-- User -->
+    <g>
+      <rect x="40" y="110" width="180" height="90" rx="14" fill="#1e293b" stroke="#334155"/>
+      <text x="130" y="150" font-size="20" font-weight="700" fill="#f8fafc" text-anchor="middle">👤 Пользователь</text>
+      <text x="130" y="176" font-size="14" fill="#94a3b8" text-anchor="middle">Telegram-клиент</text>
+    </g>
+
+    <!-- Telegram API -->
+    <g>
+      <rect x="40" y="240" width="180" height="80" rx="14" fill="#1e293b" stroke="#334155"/>
+      <text x="130" y="276" font-size="18" font-weight="700" fill="#38bdf8" text-anchor="middle">Telegram</text>
+      <text x="130" y="300" font-size="14" fill="#94a3b8" text-anchor="middle">Bot API · MTProto</text>
+    </g>
+
+    <!-- aiogram layer -->
+    <g>
+      <rect x="300" y="96" width="300" height="360" rx="16" fill="#11182f" stroke="#3b4a6b"/>
+      <text x="320" y="128" font-size="17" font-weight="800" fill="#a5b4fc">aiogram · Dispatcher</text>
+
+      <rect x="322" y="150" width="256" height="58" rx="10" fill="#1e293b" stroke="#334155"/>
+      <text x="338" y="174" font-size="15" font-weight="600" fill="#e2e8f0">Throttle middleware</text>
+      <text x="338" y="195" font-size="12.5" fill="#94a3b8">анти-дабл-клик</text>
+
+      <rect x="322" y="218" width="256" height="58" rx="10" fill="#1e293b" stroke="#334155"/>
+      <text x="338" y="242" font-size="15" font-weight="600" fill="#e2e8f0">Subscription middleware</text>
+      <text x="338" y="263" font-size="12.5" fill="#94a3b8">проверка подписки на канал</text>
+
+      <rect x="322" y="286" width="256" height="92" rx="10" fill="#1e293b" stroke="#334155"/>
+      <text x="338" y="310" font-size="15" font-weight="600" fill="#e2e8f0">Routers (handlers)</text>
+      <text x="338" y="331" font-size="12.5" fill="#94a3b8">parsing · accounts · help</text>
+      <text x="338" y="349" font-size="12.5" fill="#94a3b8">referral · admin · broadcast</text>
+      <text x="338" y="367" font-size="12.5" fill="#94a3b8">FSM-сценарии</text>
+
+      <rect x="322" y="388" width="256" height="50" rx="10" fill="#1e293b" stroke="#334155"/>
+      <text x="338" y="418" font-size="14.5" font-weight="600" fill="#e2e8f0">Global error-handler</text>
+    </g>
+
+    <!-- services -->
+    <g>
+      <rect x="660" y="110" width="270" height="150" rx="16" fill="#11182f" stroke="#3b4a6b"/>
+      <text x="680" y="142" font-size="17" font-weight="800" fill="#a5b4fc">services</text>
+      <rect x="680" y="158" width="230" height="44" rx="9" fill="#1e293b" stroke="#334155"/>
+      <text x="695" y="185" font-size="14.5" font-weight="600" fill="#e2e8f0">TelethonCore · парсинг</text>
+      <rect x="680" y="208" width="230" height="40" rx="9" fill="#1e293b" stroke="#334155"/>
+      <text x="695" y="233" font-size="13.5" fill="#94a3b8">per-session locks · FloodWait</text>
+    </g>
+
+    <!-- utils -->
+    <g>
+      <rect x="660" y="290" width="270" height="80" rx="16" fill="#11182f" stroke="#3b4a6b"/>
+      <text x="680" y="320" font-size="16" font-weight="700" fill="#a5b4fc">utils · отчёты</text>
+      <text x="680" y="344" font-size="13.5" fill="#94a3b8">ExcelGenerator → .xlsx / .txt</text>
+    </g>
+
+    <!-- storage -->
+    <g>
+      <rect x="980" y="110" width="180" height="110" rx="16" fill="#11182f" stroke="#3b4a6b"/>
+      <text x="1070" y="142" font-size="16" font-weight="800" fill="#34d399" text-anchor="middle">SQLite</text>
+      <text x="1070" y="166" font-size="13" fill="#94a3b8" text-anchor="middle">database.db</text>
+      <text x="1070" y="186" font-size="12.5" fill="#94a3b8" text-anchor="middle">единое соединение</text>
+      <text x="1070" y="204" font-size="12.5" fill="#94a3b8" text-anchor="middle">WAL · Lock</text>
+    </g>
+
+    <g>
+      <rect x="980" y="240" width="180" height="80" rx="16" fill="#11182f" stroke="#3b4a6b"/>
+      <text x="1070" y="270" font-size="15" font-weight="700" fill="#34d399" text-anchor="middle">FSM storage</text>
+      <text x="1070" y="293" font-size="12.5" fill="#94a3b8" text-anchor="middle">fsm.db · переживает</text>
+      <text x="1070" y="310" font-size="12.5" fill="#94a3b8" text-anchor="middle">рестарт</text>
+    </g>
+
+    <!-- Telegram user-accounts (sessions) -->
+    <g>
+      <rect x="660" y="400" width="500" height="70" rx="14" fill="#1e293b" stroke="#334155"/>
+      <text x="680" y="430" font-size="15" font-weight="700" fill="#38bdf8">Telegram MTProto · сессии аккаунтов</text>
+      <text x="680" y="453" font-size="13" fill="#94a3b8">sessions/*.session — системная + пользовательские (для закрытых чатов)</text>
+    </g>
+  </g>
+
+  <!-- arrows -->
+  <g stroke="#64748b" stroke-width="2" fill="none">
+    <path d="M130,200 L130,240" marker-end="url(#arrow)"/>
+    <path d="M220,278 L300,278" marker-end="url(#arrow)"/>
+    <path d="M600,300 L660,200" marker-end="url(#arrow)"/>
+    <path d="M600,330 L660,330" marker-end="url(#arrow)"/>
+    <path d="M930,185 L980,170" marker-end="url(#arrow)"/>
+    <path d="M930,235 L980,270" marker-end="url(#arrow)"/>
+    <path d="M795,260 L795,400" marker-end="url(#arrow)"/>
+  </g>
+  <text x="612" y="250" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#64748b" transform="rotate(-38 612 250)">парсинг</text>
+  <text x="612" y="322" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#64748b">лимиты/история</text>
+</svg>
