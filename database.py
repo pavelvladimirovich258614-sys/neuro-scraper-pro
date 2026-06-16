@@ -219,7 +219,16 @@ class Database:
         Check if user has available parsing attempts
         Returns: {"has_limit": bool, "remaining": int, "is_premium": bool}
         """
-        # Check global access flag first - if open, all users have unlimited access
+        # Админ всегда безлимитен — проверяем в первую очередь,
+        # даже если его ещё нет в таблице users.
+        if user_id == config.ADMIN_ID:
+            return {
+                "has_limit": True,
+                "remaining": -1,  # -1 означает безлимит
+                "is_premium": True
+            }
+
+        # Check global access flag - if open, all users have unlimited access
         if await self.is_access_open():
             return {
                 "has_limit": True,
@@ -236,14 +245,6 @@ class Database:
                 "has_limit": True,
                 "remaining": config.FREE_PARSING_LIMIT,
                 "is_premium": False
-            }
-
-        # Admin always has unlimited access
-        if user_id == config.ADMIN_ID:
-            return {
-                "has_limit": True,
-                "remaining": -1,  # -1 означает безлимит
-                "is_premium": True
             }
 
         is_premium = bool(user["is_premium"])

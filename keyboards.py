@@ -52,6 +52,24 @@ def get_not_subscribed_menu() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def get_unsubscribed_menu() -> InlineKeyboardMarkup:
+    """Меню когда пользователь ОТПИСАЛСЯ от канала (был подписан, но отписался)"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="📢 Подписаться",
+            url=SUBSCRIPTION_CHANNEL_LINK
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="✅ Проверить подписку",
+            callback_data="check_subscription"
+        )
+    )
+    return builder.as_markup()
+
+
 def get_main_menu() -> InlineKeyboardMarkup:
     """Главное меню бота"""
     builder = InlineKeyboardBuilder()

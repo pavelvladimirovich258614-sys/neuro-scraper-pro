@@ -41,6 +41,7 @@ from telethon.tl.types import (
 )
 
 import config
+from utils.link_parser import parse_post_link
 
 logger = logging.getLogger(__name__)
 
@@ -603,45 +604,31 @@ class TelethonCore:
                 result.errors.append("Не удалось подключиться. Переподключите аккаунт.")
                 return result
 
-            # Улучшенный парсер ссылки на пост
-            # Поддержка форматов:
-            # - https://t.me/channel_username/123
-            # - https://t.me/c/1234567890/123 (приватный канал по ID)
-            # - t.me/channel/123
+            # Разбор ссылки на пост вынесен в чистую функцию parse_post_link
             try:
-                # Убираем https:// и http://
-                clean_link = post_link.replace("https://", "").replace("http://", "").rstrip("/")
-                parts = clean_link.split("/")
-
-                logger.info(f"[SinglePost] Parsing link: {post_link} -> parts: {parts}")
-
-                # Минимум должно быть: t.me/channel/123 или t.me/c/id/123
-                if len(parts) < 3:
-                    result.errors.append("Неверный формат ссылки. Используйте: t.me/channel/123")
+                try:
+                    link_info = parse_post_link(post_link)
+                except ValueError as ve:
+                    result.errors.append(f"Неверный формат ссылки: {str(ve)}")
                     return result
 
+                message_id = link_info.message_id
                 entity = None
-                message_id = None
 
-                # Формат: t.me/c/1234567890/123 (приватный канал)
-                if parts[1] == "c" and len(parts) >= 4:
-                    channel_id = int(parts[2])
-                    message_id = int(parts[3].split("?")[0])  # Убираем query params
-                    logger.debug(f"[SinglePost] Private channel id={channel_id}, msg={message_id}")
-                    entity = await self._resolve_private_channel(client, channel_id)
+                if link_info.is_private:
+                    # Приватный канал t.me/c/<id> — надёжный резолв с прогревом кэша
+                    logger.debug(f"[SinglePost] Private channel id={link_info.channel_id}, msg={message_id}")
+                    entity = await self._resolve_private_channel(client, link_info.channel_id)
                     if entity is None:
                         result.errors.append(
                             "Не удалось открыть приватный канал. Убедитесь, что "
                             "аккаунт, которым вы парсите, состоит в этом канале."
                         )
                         return result
-
-                # Формат: t.me/channel_username/123 (публичный канал)
                 else:
-                    channel_username = parts[1]
-                    message_id = int(parts[2].split("?")[0])  # Убираем query params
-                    logger.info(f"[SinglePost] Public channel: @{channel_username}, msg: {message_id}")
-                    entity = await client.get_entity(channel_username)
+                    # Публичный канал t.me/<username>
+                    logger.debug(f"[SinglePost] Public channel: @{link_info.username}, msg: {message_id}")
+                    entity = await client.get_entity(link_info.username)
 
                 result.target_title = getattr(entity, 'title', str(entity.id))
 
