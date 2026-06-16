@@ -85,6 +85,53 @@ class TelethonCore:
     def __init__(self):
         self.clients: Dict[str, TelegramClient] = {}
         self.active_sessions: Dict[str, bool] = {}
+        # Блокировки по имени сессии: гарантируют, что с одним .session-файлом
+        # одновременно работает только одна операция. Критично для общей
+        # системной сессии, которую используют все пользователи без своего
+        # аккаунта — иначе параллельные парсинги рвут друг другу соединение
+        # и ловят "database is locked" на самом файле сессии.
+        self._session_locks: Dict[str, asyncio.Lock] = {}
+
+    def _get_session_lock(self, session_name: str) -> asyncio.Lock:
+        """Получить (или создать) блокировку для конкретной сессии."""
+        lock = self._session_locks.get(session_name)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[session_name] = lock
+        return lock
+
+    # ===== ПУБЛИЧНЫЕ ОБЁРТКИ С БЛОКИРОВКОЙ СЕССИИ =====
+    # Каждая операция, работающая с TelegramClient, берёт блокировку по имени
+    # сессии на всё время выполнения. Конкурентные вызовы по одной сессии
+    # выстраиваются в очередь вместо взаимных дисконнектов.
+
+    async def parse_channel_comments(self, session_name: str, *args, **kwargs) -> "ParsingResult":
+        async with self._get_session_lock(session_name):
+            return await self._parse_channel_comments(session_name, *args, **kwargs)
+
+    async def parse_single_post(self, session_name: str, *args, **kwargs) -> "ParsingResult":
+        async with self._get_session_lock(session_name):
+            return await self._parse_single_post(session_name, *args, **kwargs)
+
+    async def parse_chat_members(self, session_name: str, *args, **kwargs) -> "ParsingResult":
+        async with self._get_session_lock(session_name):
+            return await self._parse_chat_members(session_name, *args, **kwargs)
+
+    async def parse_chat_participants(self, session_name: str, *args, **kwargs) -> "ParsingResult":
+        async with self._get_session_lock(session_name):
+            return await self._parse_chat_participants(session_name, *args, **kwargs)
+
+    async def parse_chat_by_id(self, session_name: str, *args, **kwargs) -> "ParsingResult":
+        async with self._get_session_lock(session_name):
+            return await self._parse_chat_by_id(session_name, *args, **kwargs)
+
+    async def join_chat(self, session_name: str, *args, **kwargs):
+        async with self._get_session_lock(session_name):
+            return await self._join_chat(session_name, *args, **kwargs)
+
+    async def get_user_dialogs(self, session_name: str, *args, **kwargs):
+        async with self._get_session_lock(session_name):
+            return await self._get_user_dialogs(session_name, *args, **kwargs)
 
     def get_smart_session(self, user_id: int) -> Tuple[str, bool]:
         """
@@ -322,7 +369,7 @@ class TelethonCore:
         logger.error(f"[Fallback] All sessions failed!")
         return None, session_name
 
-    async def parse_channel_comments(
+    async def _parse_channel_comments(
         self,
         session_name: str,
         channel_link: str,
@@ -493,7 +540,7 @@ class TelethonCore:
 
         return result
 
-    async def parse_single_post(
+    async def _parse_single_post(
         self,
         session_name: str,
         post_link: str,
@@ -681,7 +728,7 @@ class TelethonCore:
 
         return result
 
-    async def parse_chat_members(
+    async def _parse_chat_members(
         self,
         session_name: str,
         chat_link: str,
@@ -940,7 +987,7 @@ class TelethonCore:
         multiplier = min(multiplier, 3.0)  # Максимум x3
         await self._random_delay(multiplier)
 
-    async def join_chat(
+    async def _join_chat(
         self,
         session_name: str,
         chat_link: str
@@ -1056,7 +1103,7 @@ class TelethonCore:
 
     # ===== НОВЫЕ МЕТОДЫ ДЛЯ ADVANCED FEATURES =====
     
-    async def get_user_dialogs(
+    async def _get_user_dialogs(
         self,
         session_name: str,
         limit: int = 20
@@ -1096,7 +1143,7 @@ class TelethonCore:
             if client:
                 await client.disconnect()
     
-    async def parse_chat_participants(
+    async def _parse_chat_participants(
         self,
         session_name: str,
         chat_link: str,
@@ -1220,7 +1267,7 @@ class TelethonCore:
         
         return result
     
-    async def parse_chat_by_id(
+    async def _parse_chat_by_id(
         self,
         session_name: str,
         chat_id: int,

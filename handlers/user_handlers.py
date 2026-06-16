@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 # Минимальный интервал между обновлениями прогресса (секунды)
 PROGRESS_UPDATE_INTERVAL = 3.0
 
+# Реестр пользователей с активным парсингом — не даём одному юзеру запускать
+# два парсинга одновременно (иначе конкурируют за одну сессию и путают FSM).
+_active_parsings: set = set()
+
 router = Router()
 
 
@@ -202,7 +206,12 @@ async def check_subscription_callback(callback: CallbackQuery):
     """Обработчик кнопки 'Проверить подписку'"""
     user_id = callback.from_user.id
     
-    is_subscribed = await check_subscription(callback.bot, user_id)
+    # Очищаем кэш middleware для этого пользователя
+    from middlewares.subscription_middleware import clear_subscription_cache
+    clear_subscription_cache(user_id)
+    
+    # Проверяем подписку напрямую (skip_cache=True)
+    is_subscribed = await check_subscription(callback.bot, user_id, skip_cache=True)
     
     if is_subscribed:
         # Пользователь подписан - показываем главное меню
@@ -1312,16 +1321,25 @@ async def start_parsing_with_settings(callback: CallbackQuery, state: FSMContext
         # Пробуем получить сессию автоматически
         session_name, _ = telethon_core.get_smart_session(user_id)
         await state.update_data(session_name=session_name)
-    
+
+    # Guard: не запускаем второй параллельный парсинг для того же пользователя
+    if user_id in _active_parsings:
+        await callback.answer(
+            "⏳ У вас уже идёт парсинг. Дождитесь его завершения.",
+            show_alert=True
+        )
+        return
+
+    _active_parsings.add(user_id)
     progress_msg = await callback.message.edit_text(
         "🚀 <b>Начинаем парсинг...</b>\n\n"
         "⏳ Подготовка...",
         parse_mode="HTML"
     )
-    
+
     last_update_time = [0.0]
     last_text = [""]
-    
+
     async def progress_callback(scanned, total, users_found, status: str = None):
         current_time = time.time()
         if current_time - last_update_time[0] < PROGRESS_UPDATE_INTERVAL:
@@ -1449,7 +1467,10 @@ async def start_parsing_with_settings(callback: CallbackQuery, state: FSMContext
             reply_markup=keyboards.get_main_menu(),
             parse_mode="HTML"
         )
-    
+    finally:
+        # Снимаем флаг активного парсинга в любом случае
+        _active_parsings.discard(user_id)
+
     await state.clear()
     await callback.answer()
 
@@ -1848,6 +1869,14 @@ async def start_parsing(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
     
+    # Guard: не запускаем второй параллельный парсинг для того же пользователя
+    if user_id in _active_parsings:
+        await callback.answer(
+            "⏳ У вас уже идёт парсинг. Дождитесь его завершения.",
+            show_alert=True
+        )
+        return
+
     parse_type = data.get("parse_type", "channel_posts")
     time_filter = data.get("time_filter")
     time_days = data.get("time_days")
@@ -1857,13 +1886,12 @@ async def start_parsing(callback: CallbackQuery, state: FSMContext):
     detect_gender = data.get("detect_gender", False)
     max_posts = data.get("max_posts", 50)
 
-    # DEBUG: Логируем какая сессия используется
-    logger.info(f"[StartParsing] User: {user_id}")
-    logger.info(f"[StartParsing] Session: {session_name}")
-    logger.info(f"[StartParsing] Is User Session: {is_user_session}")
-    logger.info(f"[StartParsing] Link: {link}")
-    logger.info(f"[StartParsing] Parse Type: {parse_type}")
+    logger.debug(
+        f"[StartParsing] user={user_id} session={session_name} "
+        f"is_user={is_user_session} type={parse_type} link={link}"
+    )
 
+    _active_parsings.add(user_id)
     progress_msg = await callback.message.edit_text(
         "🚀 <b>Начинаем парсинг...</b>\n\n"
         "⏳ Подготовка...",
@@ -2113,6 +2141,9 @@ async def start_parsing(callback: CallbackQuery, state: FSMContext):
             reply_markup=keyboards.get_main_menu(),
             parse_mode="HTML"
         )
+    finally:
+        # Снимаем флаг активного парсинга в любом случае
+        _active_parsings.discard(user_id)
 
     await state.clear()
 
