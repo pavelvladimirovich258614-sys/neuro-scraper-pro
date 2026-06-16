@@ -31,41 +31,41 @@ _active_parsings: set = set()
 router = Router()
 
 
+# ===== ОБЩИЕ ХЕЛПЕРЫ ЗАВЕРШЕНИЯ ПАРСИНГА =====
+
+async def _record_parsing(user_id: int, target_link: str, parse_type: str,
+                          time_filter, result) -> None:
+    """Списать лимит и записать парсинг в историю (общее для всех режимов)."""
+    await db.decrease_limit(user_id)
+    await db.add_parsing_history(
+        user_id=user_id,
+        target_link=target_link,
+        parse_type=parse_type,
+        time_filter=time_filter,
+        users_found=len(result.users),
+        admins_found=len(result.admins)
+    )
+
+
+async def _remaining_text(user_id: int) -> str:
+    """Текст об остатке парсингов (пусто для премиума/безлимита)."""
+    limit_info = await db.check_limit(user_id)
+    if limit_info["is_premium"]:
+        return ""
+    return f"\n\n💎 Осталось парсингов: <b>{limit_info['remaining']}</b>"
+
+
 # ===== ПРОВЕРКА ПОДПИСКИ НА КАНАЛ =====
 
 async def check_subscription(bot, user_id: int, skip_cache: bool = False) -> bool:
+    """Проверяет подписку пользователя на обязательный канал.
+
+    Делегирует в единую функцию is_user_subscribed (общий TTL-кэш + Telegram
+    API + синхронизация БД), чтобы хендлеры и middleware использовали одну и ту
+    же логику. skip_cache=True форсирует проверку через API (минуя кэш).
     """
-    Проверяет подписку пользователя на обязательный канал.
-    Сначала проверяет кэш в БД, затем Telegram API если нужно.
-    Возвращает True если подписан, False если нет.
-    
-    Args:
-        bot: Telegram Bot instance
-        user_id: ID пользователя
-        skip_cache: Если True, пропустить проверку кэша и сразу идти в Telegram API
-    """
-    # 1. Сначала проверяем кэш в базе данных (если не указано пропустить)
-    if not skip_cache:
-        is_cached = await db.is_subscription_verified(user_id)
-        if is_cached:
-            logger.debug(f"Subscription verified from cache for user {user_id}")
-            return True
-    
-    # 2. Проверяем через Telegram API
-    CHANNEL_ID = keyboards.SUBSCRIPTION_CHANNEL_ID
-    try:
-        member = await bot.get_chat_member(CHANNEL_ID, user_id)
-        is_subscribed = member.status in ['member', 'administrator', 'creator']
-        
-        # 3. Если подписан - сохраняем в кэш
-        if is_subscribed:
-            await db.set_subscription_verified(user_id, True)
-            logger.info(f"Subscription verified and cached for user {user_id}")
-        
-        return is_subscribed
-    except Exception as e:
-        logger.warning(f"Subscription check failed for user {user_id}: {e}")
-        return False
+    from middlewares.subscription_middleware import is_user_subscribed
+    return await is_user_subscribed(bot, user_id, force=skip_cache)
 
 
 # FSM States
@@ -541,7 +541,7 @@ async def process_code(message: Message, state: FSMContext):
     # Удаляем сообщение пользователя с кодом (безопасность)
     try:
         await message.delete()
-    except:
+    except Exception:
         pass
 
     # Проверяем что код похож на валидный
@@ -660,7 +660,7 @@ async def process_2fa(message: Message, state: FSMContext):
     # Удаляем сообщение с паролем (безопасность!)
     try:
         await message.delete()
-    except:
+    except Exception:
         pass
 
     wait_msg = await message.answer("⏳ Проверяем пароль...")
@@ -1397,19 +1397,9 @@ async def start_parsing_with_settings(callback: CallbackQuery, state: FSMContext
             include_gender=detect_gender
         )
         
-        # Уменьшаем лимит
-        await db.decrease_limit(user_id)
-        
-        # Сохраняем в историю
-        await db.add_parsing_history(
-            user_id=user_id,
-            target_link=f"dialog:{chat_id}",
-            parse_type="chat_dialogs",
-            time_filter=None,
-            users_found=len(result.users),
-            admins_found=len(result.admins)
-        )
-        
+        # Списываем лимит и пишем историю
+        await _record_parsing(user_id, f"dialog:{chat_id}", "chat_dialogs", None, result)
+
         # Отправляем файлы
         await progress_msg.edit_text("📤 Отправляем файлы...", parse_mode="HTML")
         
@@ -1433,11 +1423,8 @@ async def start_parsing_with_settings(callback: CallbackQuery, state: FSMContext
                 )
         
         # Итоговое сообщение
-        limit_info = await db.check_limit(user_id)
-        remaining_text = ""
-        if not limit_info["is_premium"]:
-            remaining_text = f"\n\n💎 Осталось парсингов: <b>{limit_info['remaining']}</b>"
-        
+        remaining_text = await _remaining_text(user_id)
+
         premium_count = len([u for u in result.users if u.is_premium])
         
         await progress_msg.edit_text(
@@ -2068,18 +2055,8 @@ async def start_parsing(callback: CallbackQuery, state: FSMContext):
             await state.clear()
             return
 
-        # Уменьшаем лимит
-        await db.decrease_limit(user_id)
-
-        # Сохраняем в историю
-        await db.add_parsing_history(
-            user_id=user_id,
-            target_link=link,
-            parse_type=parse_type,
-            time_filter=time_filter,
-            users_found=len(result.users),
-            admins_found=len(result.admins)
-        )
+        # Списываем лимит и пишем историю
+        await _record_parsing(user_id, link, parse_type, time_filter, result)
 
         # Отправляем файлы
         await progress_msg.edit_text(
@@ -2104,10 +2081,7 @@ async def start_parsing(callback: CallbackQuery, state: FSMContext):
         )
 
         # Итоговое сообщение
-        limit_info = await db.check_limit(user_id)
-        remaining_text = ""
-        if not limit_info["is_premium"]:
-            remaining_text = f"\n\n💎 Осталось парсингов: <b>{limit_info['remaining']}</b>"
+        remaining_text = await _remaining_text(user_id)
 
         await progress_msg.edit_text(
             f"✅ <b>Парсинг завершен!</b>\n\n"
@@ -2131,7 +2105,7 @@ async def start_parsing(callback: CallbackQuery, state: FSMContext):
         try:
             excel_path.unlink()
             txt_path.unlink()
-        except:
+        except Exception:
             pass
 
     except Exception as e:

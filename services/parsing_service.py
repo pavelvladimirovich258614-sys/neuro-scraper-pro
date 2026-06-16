@@ -273,11 +273,13 @@ class ParsingService:
         Returns:
             ParsingResult with parsed data
         """
+        # ВНИМАНИЕ: telethon_core.parse_chat_by_id не принимает time_filter_days
+        # (парсит без временного фильтра) — раньше передача этого аргумента
+        # приводила к TypeError при вызове.
         return await self.telethon.parse_chat_by_id(
             session_name=request.session_name,
             chat_id=chat_id,
             max_messages=request.max_posts,
-            time_filter_days=request.time_days,
             parse_bio=request.parse_bio,
             detect_gender=request.detect_gender,
             progress_callback=progress_callback

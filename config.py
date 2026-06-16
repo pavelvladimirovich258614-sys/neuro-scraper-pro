@@ -31,6 +31,11 @@ if not API_ID or not API_HASH:
 # Support Link
 SUPPORT_LINK = os.getenv("SUPPORT_LINK", "https://t.me/NeuroCash_Support_Bot")
 
+# Обязательный канал для подписки (проверяется middleware).
+# Значения по умолчанию сохранены для обратной совместимости — переопределяйте в .env.
+SUBSCRIPTION_CHANNEL_ID = int(os.getenv("SUBSCRIPTION_CHANNEL_ID", "-1002443306268"))
+SUBSCRIPTION_CHANNEL_LINK = os.getenv("SUBSCRIPTION_CHANNEL_LINK", "https://t.me/Novopoltsev_Pavel")
+
 # Database Configuration
 DATABASE_PATH = BASE_DIR / os.getenv("DATABASE_PATH", "database.db")
 

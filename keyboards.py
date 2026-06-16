@@ -11,9 +11,10 @@ import config
 
 # ===== ПРОВЕРКА ПОДПИСКИ НА КАНАЛ =====
 
-# Константы для проверки подписки
-SUBSCRIPTION_CHANNEL_ID = -1002443306268
-SUBSCRIPTION_CHANNEL_LINK = "https://t.me/Novopoltsev_Pavel"
+# Константы для проверки подписки (источник правды — config/.env).
+# Реэкспорт сохранён для обратной совместимости со старыми импортами.
+SUBSCRIPTION_CHANNEL_ID = config.SUBSCRIPTION_CHANNEL_ID
+SUBSCRIPTION_CHANNEL_LINK = config.SUBSCRIPTION_CHANNEL_LINK
 
 
 def get_subscription_check_menu() -> InlineKeyboardMarkup:

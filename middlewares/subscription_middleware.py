@@ -24,6 +24,41 @@ CHANNEL_URL = keyboards.SUBSCRIPTION_CHANNEL_LINK
 _subscription_cache: Dict[int, tuple] = {}
 CACHE_TTL = 10  # секунд
 
+# Поведение при ошибке проверки через Telegram API.
+# True (fail-open) — не блокируем пользователя при временном сбое API.
+SUBSCRIPTION_FAIL_OPEN = True
+
+
+async def _check_subscription_api(bot: Bot, user_id: int) -> bool:
+    """Проверить подписку напрямую через Telegram API."""
+    try:
+        member = await bot.get_chat_member(CHANNEL_ID, user_id)
+        return member.status in ['member', 'administrator', 'creator']
+    except Exception as e:
+        logger.warning(f"Subscription check failed for user {user_id}: {e}")
+        # При ошибке API — поведение задаётся флагом (по умолчанию не блокируем)
+        return SUBSCRIPTION_FAIL_OPEN
+
+
+async def is_user_subscribed(bot: Bot, user_id: int, force: bool = False) -> bool:
+    """Единая точка проверки подписки (используется и middleware, и хендлерами).
+
+    Логика: in-memory кэш (TTL) -> Telegram API -> синхронизация кэша в БД.
+    force=True пропускает in-memory кэш (для кнопки «Проверить подписку»).
+    """
+    now = time.time()
+
+    if not force and user_id in _subscription_cache:
+        cached_result, cached_time = _subscription_cache[user_id]
+        if now - cached_time < CACHE_TTL:
+            return cached_result
+
+    is_subscribed = await _check_subscription_api(bot, user_id)
+    _subscription_cache[user_id] = (is_subscribed, now)
+    # Держим БД-кэш в синхроне с реальным статусом
+    await db.set_subscription_verified(user_id, is_subscribed)
+    return is_subscribed
+
 
 class SubscriptionMiddleware(BaseMiddleware):
     """
@@ -54,57 +89,18 @@ class SubscriptionMiddleware(BaseMiddleware):
             logger.warning("Bot not found in middleware data")
             return await handler(event, data)
         
-        # Проверяем подписку (с кэшем для оптимизации)
-        is_subscribed = await self._check_subscription_cached(bot, user_id)
-        
+        # Проверяем подписку через единую функцию (общий кэш + API + БД)
+        is_subscribed = await is_user_subscribed(bot, user_id)
+
         if is_subscribed:
             # Пользователь подписан — пропускаем к хендлеру
             return await handler(event, data)
-        
+
         # Пользователь НЕ подписан — блокируем и показываем сообщение
         await self._show_unsubscribed_message(event, bot)
-        
+
         # НЕ вызываем handler — блокируем действие
         return None
-
-    async def _check_subscription_cached(self, bot: Bot, user_id: int) -> bool:
-        """
-        Проверяет подписку с использованием in-memory кэша.
-        Кэш сбрасывается через CACHE_TTL секунд.
-        """
-        global _subscription_cache
-        
-        current_time = time.time()
-        
-        # Проверяем кэш
-        if user_id in _subscription_cache:
-            cached_result, cached_time = _subscription_cache[user_id]
-            if current_time - cached_time < CACHE_TTL:
-                return cached_result
-        
-        # Кэш устарел или отсутствует — проверяем через Telegram API
-        is_subscribed = await self._check_subscription_api(bot, user_id)
-        
-        # Сохраняем в кэш
-        _subscription_cache[user_id] = (is_subscribed, current_time)
-        
-        # Обновляем статус в БД
-        if not is_subscribed:
-            # Сбрасываем кэш подписки в базе
-            await db.set_subscription_verified(user_id, False)
-        
-        return is_subscribed
-
-    async def _check_subscription_api(self, bot: Bot, user_id: int) -> bool:
-        """Проверяет подписку напрямую через Telegram API"""
-        try:
-            member = await bot.get_chat_member(CHANNEL_ID, user_id)
-            is_subscribed = member.status in ['member', 'administrator', 'creator']
-            return is_subscribed
-        except Exception as e:
-            logger.warning(f"Subscription check failed for user {user_id}: {e}")
-            # При ошибке — считаем что подписан (чтобы не блокировать)
-            return True
 
     async def _show_unsubscribed_message(
         self, 

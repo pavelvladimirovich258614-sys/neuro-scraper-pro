@@ -152,11 +152,11 @@ class TelethonCore:
         # Ищем любую сессию пользователя в папке sessions
         for session_file in sessions_dir.glob(f"{user_prefix}*.session"):
             session_name = session_file.stem  # без .session
-            logger.info(f"[SmartSession] ✅ Found USER session: {session_name}")
+            logger.debug(f"[SmartSession] ✅ Found USER session: {session_name}")
             return session_name, True
         
         # Пользовательской сессии нет - используем системную
-        logger.info(f"[SmartSession] ⚠️ No user session for {user_id}, using SYSTEM session")
+        logger.debug(f"[SmartSession] ⚠️ No user session for {user_id}, using SYSTEM session")
         return config.SYSTEM_SESSION_NAME, False
 
     async def create_client(
@@ -294,16 +294,16 @@ class TelethonCore:
         """Получить активного клиента по имени сессии с автоматическим переподключением"""
         session_path = config.SESSIONS_DIR / f"{session_name}.session"
         
-        logger.info(f"[GetClient] Requesting client for session: {session_name}")
-        logger.info(f"[GetClient] Session path: {session_path}")
-        logger.info(f"[GetClient] Session exists: {session_path.exists()}")
+        logger.debug(f"[GetClient] Requesting client for session: {session_name}")
+        logger.debug(f"[GetClient] Session path: {session_path}")
+        logger.debug(f"[GetClient] Session exists: {session_path.exists()}")
 
         if not session_path.exists():
             logger.error(f"[GetClient] ❌ Session file NOT FOUND: {session_path}")
             return None
 
         client = await self.create_client(session_name)
-        logger.info(f"[GetClient] Client created for: {session_name}")
+        logger.debug(f"[GetClient] Client created for: {session_name}")
 
         for attempt in range(MAX_RECONNECT_ATTEMPTS):
             try:
@@ -357,7 +357,7 @@ class TelethonCore:
         # Пробуем основную сессию
         client = await self.get_client(session_name)
         if client:
-            logger.info(f"[Fallback] Using requested session: {session_name}")
+            logger.debug(f"[Fallback] Using requested session: {session_name}")
             return client, session_name
         
         # Fallback на системную сессию
@@ -365,7 +365,7 @@ class TelethonCore:
             logger.warning(f"[Fallback] Session {session_name} failed, trying SYSTEM session")
             client = await self.get_client(config.SYSTEM_SESSION_NAME)
             if client:
-                logger.info(f"[Fallback] Using SYSTEM session as fallback")
+                logger.debug(f"[Fallback] Using SYSTEM session as fallback")
                 return client, config.SYSTEM_SESSION_NAME
         
         logger.error(f"[Fallback] All sessions failed!")
@@ -1058,7 +1058,7 @@ class TelethonCore:
                     try:
                         entity = await client.get_entity(chat_link)
                         chat_title = getattr(entity, 'title', 'Чат')
-                    except:
+                    except Exception:
                         pass
                     return True, "Вы уже состоите в этом чате", chat_title
                     
