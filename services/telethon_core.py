@@ -6,7 +6,6 @@ Handles all Telegram parsing operations using Telethon MTProto client
 import asyncio
 import logging
 import random
-import functools
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Dict, List, Any, Tuple, Callable
@@ -48,31 +47,6 @@ logger = logging.getLogger(__name__)
 MAX_FLOOD_WAIT = 300  # 5 минут
 # Количество попыток переподключения
 MAX_RECONNECT_ATTEMPTS = 3
-
-
-def handle_flood_wait(max_retries: int = 3):
-    """
-    Декоратор для автоматической обработки FloodWaitError.
-    Ждёт указанное время и повторяет запрос.
-    """
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
-            retries = 0
-            while retries < max_retries:
-                try:
-                    return await func(*args, **kwargs)
-                except FloodWaitError as e:
-                    wait_time = e.seconds
-                    if wait_time > MAX_FLOOD_WAIT:
-                        logger.warning(f"FloodWait {wait_time}s exceeds max {MAX_FLOOD_WAIT}s, aborting")
-                        raise
-                    logger.warning(f"FloodWait: sleeping {wait_time}s (attempt {retries + 1}/{max_retries})")
-                    await asyncio.sleep(wait_time + 1)  # +1 для надёжности
-                    retries += 1
-            raise FloodWaitError(request=None, capture=wait_time)
-        return wrapper
-    return decorator
 
 
 @dataclass

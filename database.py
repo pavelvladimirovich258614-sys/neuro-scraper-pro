@@ -5,12 +5,11 @@ Manages user data, parsing limits, and session tracking
 
 import aiosqlite
 import logging
-import shutil
-import asyncio
 from typing import Optional, Dict, Any
 from datetime import datetime
 from pathlib import Path
 from contextlib import asynccontextmanager
+import asyncio
 
 import config
 
@@ -18,7 +17,12 @@ logger = logging.getLogger(__name__)
 
 
 class Database:
-    """Database manager for user data and limits with connection pooling"""
+    """Database manager for user data and limits with a single shared connection.
+
+    Все методы работают через одно переиспользуемое соединение под asyncio.Lock.
+    Это сериализует доступ к SQLite внутри процесса и устраняет ошибки
+    "database is locked" при конкурентных запросах нескольких пользователей.
+    """
 
     # Timeout для SQLite соединений (секунды) - критично для многопользовательского доступа
     DB_TIMEOUT = 30.0
@@ -40,7 +44,13 @@ class Database:
 
     @asynccontextmanager
     async def get_connection(self):
-        """Получить переиспользуемое соединение с блокировкой"""
+        """Получить переиспользуемое соединение под блокировкой.
+
+        Блокировка держится на всё время работы с соединением, поэтому в один
+        момент времени с БД работает только одна корутина. ВАЖНО: внутри блока
+        get_connection() нельзя вызывать другие методы Database, которые тоже
+        берут это соединение — asyncio.Lock не реентрантный, будет дедлок.
+        """
         async with self._lock:
             if self._connection is None:
                 self._connection = await aiosqlite.connect(
@@ -49,7 +59,7 @@ class Database:
                 )
                 await self._setup_connection(self._connection)
             yield self._connection
-    
+
     async def close(self):
         """Закрыть соединение при завершении работы"""
         if self._connection:
@@ -58,7 +68,11 @@ class Database:
             logger.info("Database connection closed")
 
     async def init_db(self):
-        """Initialize database tables"""
+        """Initialize database tables.
+
+        Использует собственное соединение (выполняется один раз при старте,
+        до создания общего соединения).
+        """
         async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
             # Инициализируем WAL mode сразу при создании БД
             await self._setup_connection(db)
@@ -77,22 +91,12 @@ class Database:
                     last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            
+
             # Миграция: добавляем поля referrer_id и referral_bonus_given если их нет
-            try:
-                await db.execute("ALTER TABLE users ADD COLUMN referrer_id INTEGER DEFAULT NULL")
-            except:
-                pass  # Колонка уже существует
-            try:
-                await db.execute("ALTER TABLE users ADD COLUMN referral_bonus_given BOOLEAN DEFAULT 0")
-            except:
-                pass  # Колонка уже существует
-            
-            # Миграция: добавляем поле subscription_verified для кэширования проверки подписки
-            try:
-                await db.execute("ALTER TABLE users ADD COLUMN subscription_verified BOOLEAN DEFAULT 0")
-            except:
-                pass  # Колонка уже существует
+            await self._safe_add_column(db, "users", "referrer_id", "INTEGER DEFAULT NULL")
+            await self._safe_add_column(db, "users", "referral_bonus_given", "BOOLEAN DEFAULT 0")
+            # Миграция: поле subscription_verified для кэширования проверки подписки
+            await self._safe_add_column(db, "users", "subscription_verified", "BOOLEAN DEFAULT 0")
 
             # User sessions table (for Telethon accounts)
             await db.execute("""
@@ -121,7 +125,7 @@ class Database:
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 )
             """)
-            
+
             # Bot admins table (для управления админами бота)
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS bot_admins (
@@ -157,10 +161,18 @@ class Database:
             await db.commit()
             logger.info("Database initialized with indexes")
 
+    @staticmethod
+    async def _safe_add_column(db: aiosqlite.Connection, table: str, column: str, definition: str):
+        """Безопасно добавить колонку (миграция). Игнорирует только ошибку существующей колонки."""
+        try:
+            await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        except aiosqlite.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                logger.warning(f"Migration ALTER {table}.{column} failed: {e}")
+
     async def get_user(self, user_id: int) -> Optional[Dict[str, Any]]:
         """Get user data by ID"""
-        async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
-            db.row_factory = aiosqlite.Row
+        async with self.get_connection() as db:
             async with db.execute(
                 "SELECT * FROM users WHERE user_id = ?",
                 (user_id,)
@@ -180,7 +192,7 @@ class Database:
     ) -> bool:
         """Create new user in database"""
         try:
-            async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+            async with self.get_connection() as db:
                 await db.execute("""
                     INSERT INTO users (user_id, username, first_name, last_name, referrer_id)
                     VALUES (?, ?, ?, ?, ?)
@@ -194,7 +206,7 @@ class Database:
 
     async def update_user_activity(self, user_id: int):
         """Update user's last activity timestamp"""
-        async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+        async with self.get_connection() as db:
             await db.execute("""
                 UPDATE users
                 SET last_activity = CURRENT_TIMESTAMP
@@ -260,7 +272,7 @@ class Database:
         if limit_info["is_premium"]:
             return True
 
-        async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+        async with self.get_connection() as db:
             await db.execute("""
                 UPDATE users
                 SET parsing_count = parsing_count + 1,
@@ -275,7 +287,7 @@ class Database:
     async def set_premium(self, user_id: int, is_premium: bool = True) -> bool:
         """Set user premium status"""
         try:
-            async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+            async with self.get_connection() as db:
                 await db.execute("""
                     UPDATE users
                     SET is_premium = ?
@@ -291,7 +303,7 @@ class Database:
     async def reset_limit(self, user_id: int) -> bool:
         """Reset user's parsing count to 0"""
         try:
-            async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+            async with self.get_connection() as db:
                 await db.execute("""
                     UPDATE users
                     SET parsing_count = 0
@@ -310,59 +322,46 @@ class Database:
         phone_number: str,
         session_name: str
     ) -> bool:
-        """Save user's Telethon session info (with retry on database lock)"""
-        max_retries = 3
-        
-        for attempt in range(max_retries):
-            try:
-                async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
-                    await self._setup_connection(db)
-                    
-                    # Сначала проверяем, есть ли деактивированная сессия
-                    async with db.execute(
-                        "SELECT is_active FROM user_sessions WHERE session_name = ?",
-                        (session_name,)
-                    ) as cursor:
-                        existing = await cursor.fetchone()
+        """Save user's Telethon session info.
 
-                    if existing is not None:
-                        # Сессия существует - реактивируем её
-                        await db.execute("""
-                            UPDATE user_sessions
-                            SET is_active = 1, user_id = ?, phone_number = ?
-                            WHERE session_name = ?
-                        """, (user_id, phone_number, session_name))
-                        await db.commit()
-                        logger.info(f"Session reactivated for user {user_id}: {phone_number}")
-                        return True
-                    else:
-                        # Новая сессия - создаём
-                        await db.execute("""
-                            INSERT INTO user_sessions (user_id, phone_number, session_name)
-                            VALUES (?, ?, ?)
-                        """, (user_id, phone_number, session_name))
-                        await db.commit()
-                        logger.info(f"Session saved for user {user_id}: {phone_number}")
-                        return True
+        Под единым соединением "database is locked" внутри процесса не возникает,
+        поэтому отдельный retry-цикл больше не нужен.
+        """
+        try:
+            async with self.get_connection() as db:
+                # Сначала проверяем, есть ли деактивированная сессия
+                async with db.execute(
+                    "SELECT is_active FROM user_sessions WHERE session_name = ?",
+                    (session_name,)
+                ) as cursor:
+                    existing = await cursor.fetchone()
 
-            except aiosqlite.OperationalError as e:
-                if "database is locked" in str(e).lower() and attempt < max_retries - 1:
-                    wait_time = (attempt + 1) * 0.5  # 0.5s, 1.0s, 1.5s
-                    logger.warning(f"Database locked, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
-                    await asyncio.sleep(wait_time)
-                    continue
-                logger.error(f"Database error after {attempt + 1} attempts: {e}")
-                return False
-            except Exception as e:
-                logger.error(f"Error saving session: {e}")
-                return False
-        
-        return False
+                if existing is not None:
+                    # Сессия существует - реактивируем её
+                    await db.execute("""
+                        UPDATE user_sessions
+                        SET is_active = 1, user_id = ?, phone_number = ?
+                        WHERE session_name = ?
+                    """, (user_id, phone_number, session_name))
+                    await db.commit()
+                    logger.info(f"Session reactivated for user {user_id}: {phone_number}")
+                    return True
+                else:
+                    # Новая сессия - создаём
+                    await db.execute("""
+                        INSERT INTO user_sessions (user_id, phone_number, session_name)
+                        VALUES (?, ?, ?)
+                    """, (user_id, phone_number, session_name))
+                    await db.commit()
+                    logger.info(f"Session saved for user {user_id}: {phone_number}")
+                    return True
+        except Exception as e:
+            logger.error(f"Error saving session: {e}")
+            return False
 
     async def get_user_sessions(self, user_id: int) -> list:
         """Get all active sessions for user"""
-        async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
-            db.row_factory = aiosqlite.Row
+        async with self.get_connection() as db:
             async with db.execute("""
                 SELECT * FROM user_sessions
                 WHERE user_id = ? AND is_active = 1
@@ -373,7 +372,7 @@ class Database:
     async def deactivate_session(self, session_name: str) -> bool:
         """Deactivate a session"""
         try:
-            async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+            async with self.get_connection() as db:
                 await db.execute("""
                     UPDATE user_sessions
                     SET is_active = 0
@@ -396,7 +395,7 @@ class Database:
         admins_found: int = 0
     ):
         """Add parsing record to history"""
-        async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+        async with self.get_connection() as db:
             await db.execute("""
                 INSERT INTO parsing_history
                 (user_id, target_link, parse_type, time_filter, users_found, admins_found)
@@ -406,7 +405,7 @@ class Database:
 
     async def get_stats(self) -> Dict[str, int]:
         """Get overall bot statistics"""
-        async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+        async with self.get_connection() as db:
             # Total users
             async with db.execute("SELECT COUNT(*) FROM users") as cursor:
                 total_users = (await cursor.fetchone())[0]
@@ -435,8 +434,7 @@ class Database:
         Get detailed statistics for all users
         Returns list with: user_id, username, joined_date, days_in_bot, total_parses, is_premium
         """
-        async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
-            db.row_factory = aiosqlite.Row
+        async with self.get_connection() as db:
             async with db.execute("""
                 SELECT
                     user_id,
@@ -456,11 +454,11 @@ class Database:
 
 
     # ===== УПРАВЛЕНИЕ АДМИНАМИ БОТА =====
-    
+
     async def add_bot_admin(self, user_id: int, added_by: int) -> bool:
         """Добавить админа бота"""
         try:
-            async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+            async with self.get_connection() as db:
                 await db.execute("""
                     INSERT OR REPLACE INTO bot_admins (user_id, added_by)
                     VALUES (?, ?)
@@ -471,11 +469,11 @@ class Database:
         except Exception as e:
             logger.error(f"Error adding bot admin: {e}")
             return False
-    
+
     async def remove_bot_admin(self, user_id: int) -> bool:
         """Удалить админа бота"""
         try:
-            async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+            async with self.get_connection() as db:
                 await db.execute("""
                     DELETE FROM bot_admins WHERE user_id = ?
                 """, (user_id,))
@@ -485,24 +483,24 @@ class Database:
         except Exception as e:
             logger.error(f"Error removing bot admin: {e}")
             return False
-    
+
     async def is_bot_admin(self, user_id: int) -> bool:
         """Проверить, является ли пользователь админом бота"""
         # Главный админ из конфига всегда админ
         if user_id == config.ADMIN_ID:
             return True
-        
-        async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+
+        async with self.get_connection() as db:
             async with db.execute(
                 "SELECT 1 FROM bot_admins WHERE user_id = ?",
                 (user_id,)
             ) as cursor:
                 return await cursor.fetchone() is not None
-    
+
     async def get_bot_admins(self) -> list[Dict[str, Any]]:
         """Получить список всех админов бота"""
         admins = []
-        
+
         # Добавляем главного админа
         admins.append({
             "user_id": config.ADMIN_ID,
@@ -510,9 +508,8 @@ class Database:
             "added_at": "Главный админ",
             "is_main": True
         })
-        
-        async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
-            db.row_factory = aiosqlite.Row
+
+        async with self.get_connection() as db:
             async with db.execute("""
                 SELECT user_id, added_by, added_at FROM bot_admins
                 ORDER BY added_at DESC
@@ -526,7 +523,7 @@ class Database:
                             "added_at": row["added_at"],
                             "is_main": False
                         })
-        
+
         return admins
 
     # ===== УПРАВЛЕНИЕ ГЛОБАЛЬНЫМ ДОСТУПОМ =====
@@ -534,7 +531,7 @@ class Database:
     async def set_access_open(self, status: bool) -> bool:
         """Set global access open/closed flag"""
         try:
-            async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+            async with self.get_connection() as db:
                 await db.execute("""
                     INSERT OR REPLACE INTO bot_settings (key, value, updated_at)
                     VALUES ('is_access_open', ?, CURRENT_TIMESTAMP)
@@ -549,7 +546,7 @@ class Database:
     async def is_access_open(self) -> bool:
         """Check if global access is open for all users"""
         try:
-            async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+            async with self.get_connection() as db:
                 async with db.execute(
                     "SELECT value FROM bot_settings WHERE key = 'is_access_open'"
                 ) as cursor:
@@ -562,11 +559,11 @@ class Database:
             return False  # Default to closed on error
 
     # ===== КЭШИРОВАНИЕ ПРОВЕРКИ ПОДПИСКИ =====
-    
+
     async def is_subscription_verified(self, user_id: int) -> bool:
         """Проверить, подтверждена ли подписка пользователя (кэш)"""
         try:
-            async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+            async with self.get_connection() as db:
                 async with db.execute(
                     "SELECT subscription_verified FROM users WHERE user_id = ?",
                     (user_id,)
@@ -578,11 +575,11 @@ class Database:
         except Exception as e:
             logger.error(f"Error checking subscription status: {e}")
             return False
-    
+
     async def set_subscription_verified(self, user_id: int, verified: bool = True) -> bool:
         """Сохранить статус подтверждения подписки в БД"""
         try:
-            async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+            async with self.get_connection() as db:
                 await db.execute("""
                     UPDATE users
                     SET subscription_verified = ?
@@ -596,7 +593,7 @@ class Database:
             return False
 
     # ===== РЕФЕРАЛЬНАЯ СИСТЕМА =====
-    
+
     async def add_referral_bonus(self, referrer_id: int, new_user_id: int) -> bool:
         """
         Начислить бонус пригласившему пользователю.
@@ -604,7 +601,7 @@ class Database:
         Returns: True если бонус начислен
         """
         try:
-            async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+            async with self.get_connection() as db:
                 # Проверяем что бонус ещё не был начислен за этого юзера
                 async with db.execute(
                     "SELECT referral_bonus_given FROM users WHERE user_id = ?",
@@ -614,7 +611,7 @@ class Database:
                     if row and row[0]:
                         logger.info(f"Referral bonus already given for user {new_user_id}")
                         return False
-                
+
                 # Начисляем бонус рефереру (уменьшаем parsing_count, что увеличивает remaining)
                 # parsing_count - это использованные парсинги, уменьшаем чтобы увеличить остаток
                 await db.execute("""
@@ -622,44 +619,44 @@ class Database:
                     SET parsing_count = MAX(0, parsing_count - ?)
                     WHERE user_id = ?
                 """, (config.REFERRAL_BONUS, referrer_id))
-                
+
                 # Отмечаем что бонус за этого юзера уже выдан
                 await db.execute("""
                     UPDATE users
                     SET referral_bonus_given = 1
                     WHERE user_id = ?
                 """, (new_user_id,))
-                
+
                 await db.commit()
                 logger.info(f"Referral bonus +{config.REFERRAL_BONUS} given to user {referrer_id} for inviting {new_user_id}")
                 return True
-                
+
         except Exception as e:
             logger.error(f"Error adding referral bonus: {e}")
             return False
-    
+
     async def get_referral_stats(self, user_id: int) -> Dict[str, Any]:
         """Получить статистику рефералов пользователя"""
-        async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+        async with self.get_connection() as db:
             # Количество приглашённых
             async with db.execute(
                 "SELECT COUNT(*) FROM users WHERE referrer_id = ?",
                 (user_id,)
             ) as cursor:
                 invited_count = (await cursor.fetchone())[0]
-            
+
             # Общий заработанный бонус
             total_bonus = invited_count * config.REFERRAL_BONUS
-            
+
             return {
                 "invited_count": invited_count,
                 "total_bonus": total_bonus
             }
-    
+
     async def add_parsing_attempts(self, user_id: int, amount: int) -> bool:
         """Добавить попытки парсинга пользователю (уменьшить parsing_count)"""
         try:
-            async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+            async with self.get_connection() as db:
                 await db.execute("""
                     UPDATE users
                     SET parsing_count = MAX(0, parsing_count - ?)
@@ -675,31 +672,34 @@ class Database:
     async def backup_database(self, backup_dir: Path = None) -> Optional[Path]:
         """
         Создать бэкап базы данных.
+        Использует отдельные соединения (backup API), не общий коннект.
         Вызывайте раз в сутки через scheduler.
         """
         try:
             if backup_dir is None:
                 backup_dir = config.BASE_DIR / "backups"
             backup_dir.mkdir(exist_ok=True)
-            
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_path = backup_dir / f"database_backup_{timestamp}.db"
-            
-            # Используем SQLite backup API для консистентного бэкапа
-            async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as source:
-                async with aiosqlite.connect(backup_path) as dest:
-                    await source.backup(dest)
-            
+
+            # Используем SQLite backup API для консистентного бэкапа.
+            # Берём блокировку, чтобы не конкурировать с общим соединением во время бэкапа.
+            async with self._lock:
+                async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as source:
+                    async with aiosqlite.connect(backup_path) as dest:
+                        await source.backup(dest)
+
             logger.info(f"Database backup created: {backup_path}")
-            
+
             # Удаляем старые бэкапы (старше 7 дней)
             await self._cleanup_old_backups(backup_dir, days=7)
-            
+
             return backup_path
         except Exception as e:
             logger.error(f"Backup failed: {e}")
             return None
-    
+
     async def _cleanup_old_backups(self, backup_dir: Path, days: int = 7):
         """Удалить бэкапы старше N дней"""
         cutoff = datetime.now().timestamp() - (days * 86400)
@@ -712,7 +712,7 @@ class Database:
 
     async def get_all_user_ids(self) -> list[int]:
         """Получить список всех user_id из базы данных"""
-        async with aiosqlite.connect(self.db_path, timeout=self.DB_TIMEOUT) as db:
+        async with self.get_connection() as db:
             async with db.execute("SELECT user_id FROM users") as cursor:
                 rows = await cursor.fetchall()
                 return [row[0] for row in rows]
