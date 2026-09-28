@@ -177,7 +177,10 @@ class TelethonCore:
             config.API_HASH,
             device_model=config.DEVICE_MODEL,
             system_version=config.SYSTEM_VERSION,
-            app_version=config.APP_VERSION
+            app_version=config.APP_VERSION,
+            # FloodWait обрабатываем явно: не допускаем скрытых долгих пауз
+            # внутри запроса (особенно GetFullUserRequest для bio).
+            flood_sleep_threshold=0
         )
 
         self.clients[session_name] = client
@@ -431,6 +434,10 @@ class TelethonCore:
                 result.errors.append("Не удалось подключиться. Переподключите аккаунт.")
                 return result
 
+            # Circuit breaker для необязательного bio действует только в рамках
+            # этого парсинга, а не навсегда для переиспользуемого клиента.
+            setattr(client, "_bio_disabled_flood", False)
+
             # Получаем канал
             try:
                 entity = await client.get_entity(channel_link)
@@ -467,6 +474,13 @@ class TelethonCore:
             async for message in client.iter_messages(entity, limit=max_posts):
                 posts_scanned += 1
 
+                # Сразу показываем, что процесс жив, до разбора комментариев/bio.
+                if progress_callback:
+                    await progress_callback(
+                        posts_scanned, max_posts, len(users_dict),
+                        status="Читаю посты и комментарии…"
+                    )
+
                 # Проверяем временной фильтр
                 if cutoff_date and message.date < cutoff_date:
                     logger.info(f"Reached cutoff date at post {posts_scanned}")
@@ -501,8 +515,13 @@ class TelethonCore:
                                         user.gender = self._detect_gender(user.first_name)
 
                                     # Получаем био если включено
-                                    if parse_bio and not user.bio:
+                                    if parse_bio and not user.bio and not getattr(client, "_bio_disabled_flood", False):
                                         user.bio = await self._get_user_bio(client, user.user_id)
+                                        if getattr(client, "_bio_disabled_flood", False) and progress_callback:
+                                            await progress_callback(
+                                                posts_scanned, max_posts, len(users_dict),
+                                                status="Telegram ограничил запросы bio; продолжаю без bio"
+                                            )
                                         await asyncio.sleep(random.uniform(0.3, 0.8))
 
                                     # Сохраняем raw данные
@@ -1446,8 +1465,10 @@ class TelethonCore:
             if full_user and full_user.full_user:
                 return full_user.full_user.about
         except FloodWaitError as e:
-            logger.warning(f"FloodWait getting bio: {e.seconds}s")
-            await asyncio.sleep(min(e.seconds, 30))
+            logger.warning(f"FloodWait getting bio: {e.seconds}s; disabling bio lookups for this parse")
+            # Bio is optional enrichment. Stop querying it for this run instead
+            # of serially waiting/retrying for every remaining participant.
+            setattr(client, "_bio_disabled_flood", True)
         except Exception as e:
             logger.debug(f"Could not get bio for {user_id}: {e}")
         return None
