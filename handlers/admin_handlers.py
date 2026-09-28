@@ -16,6 +16,7 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramNotFound, Telegra
 
 import keyboards
 import config
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database import db
 
 logger = logging.getLogger(__name__)
@@ -285,7 +286,7 @@ async def admin_stats(callback: CallbackQuery):
 
 
 # Статистика пользователей
-@router.callback_query(F.data == "admin_user_stats")
+@router.callback_query(F.data.startswith("admin_user_stats"))
 async def admin_user_stats(callback: CallbackQuery):
     """Показать детальную статистику по пользователям"""
     if not await is_admin(callback.from_user.id):
@@ -303,14 +304,26 @@ async def admin_user_stats(callback: CallbackQuery):
         )
         return
 
-    # Формируем текстовое сообщение
+    # Пагинация: по 10 пользователей на страницу, чтобы не упираться
+    # в лимит длины сообщения (4096 символов) при росте базы
+    PAGE_SIZE = 10
+    total_users = len(user_stats)
+    total_pages = (total_users + PAGE_SIZE - 1) // PAGE_SIZE
+
+    try:
+        page = int(callback.data.split("_")[-1])
+    except (ValueError, IndexError):
+        page = 1
+    page = max(1, min(page, total_pages))
+
+    start = (page - 1) * PAGE_SIZE
+    display_users = user_stats[start:start + PAGE_SIZE]
+
     text = "📈 <b>Статистика пользователей</b>\n\n"
-    text += f"<b>Всего пользователей:</b> {len(user_stats)}\n\n"
+    text += f"<b>Всего пользователей:</b> {total_users}\n"
+    text += f"<b>Страница:</b> {page}/{total_pages}\n\n"
 
-    # Ограничиваем до 20 пользователей в сообщении
-    display_users = user_stats[:20]
-
-    for idx, user in enumerate(display_users, 1):
+    for idx, user in enumerate(display_users, start + 1):
         username = f"@{user['username']}" if user['username'] else "Нет username"
         first_name = user['first_name'] or "Нет имени"
         premium_badge = " 💎" if user['is_premium'] else ""
@@ -318,19 +331,21 @@ async def admin_user_stats(callback: CallbackQuery):
         text += f"{idx}. <b>{first_name}</b> {premium_badge}\n"
         text += f"   ID: <code>{user['user_id']}</code>\n"
         text += f"   Username: {username}\n"
-        text += f"   Регистрация: {user['registered_at'][:10]}\n"
-        text += f"   Дней в боте: {user['days_in_bot']}\n"
-        text += f"   Парсингов: {user['parsing_count']}\n"
-        text += f"   Последняя активность: {user['last_activity'][:10]}\n\n"
+        text += f"   Парсингов: {user['parsing_count']}\n\n"
 
-    if len(user_stats) > 20:
-        text += f"<i>Показаны первые 20 из {len(user_stats)} пользователей</i>\n"
+    # Кнопки навигации по страницам
+    nav_builder = InlineKeyboardBuilder()
+    if page > 1:
+        nav_builder.button(text="⬅️ Назад", callback_data=f"admin_user_stats_{page - 1}")
+    if page < total_pages:
+        nav_builder.button(text="Вперёд ➡️", callback_data=f"admin_user_stats_{page + 1}")
+    nav_builder.button(text="🔙 Админка", callback_data="back_to_admin_menu")
+    nav_builder.adjust(2, 1)
 
-    # Отправляем как новое сообщение (если текст слишком длинный для edit)
     await callback.message.answer(
         text,
         parse_mode="HTML",
-        reply_markup=keyboards.get_admin_menu()
+        reply_markup=nav_builder.as_markup()
     )
 
 
@@ -549,6 +564,17 @@ async def admin_list_admins(callback: CallbackQuery):
 
 
 # ===== УПРАВЛЕНИЕ ГЛОБАЛЬНЫМ ДОСТУПОМ К ПАРСИНГУ =====
+
+@router.callback_query(F.data == "back_to_admin_menu")
+async def back_to_admin_menu(callback: CallbackQuery):
+    """Возврат в админ-панель"""
+    await callback.message.edit_text(
+        "👑 <b>Админ-панель</b>\n\nВыберите действие:",
+        reply_markup=keyboards.get_admin_menu(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
 
 @router.callback_query(F.data == "admin_open_access")
 async def admin_open_access(callback: CallbackQuery):

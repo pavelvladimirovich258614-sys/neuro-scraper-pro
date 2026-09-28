@@ -11,6 +11,7 @@ SQLite-backed FSM storage для aiogram 3.
 
 import json
 import asyncio
+import time
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
@@ -22,8 +23,13 @@ from aiogram.fsm.storage.base import BaseStorage, StorageKey
 logger = logging.getLogger(__name__)
 
 
+# TTL FSM-состояний (сек): пользователь, не завершивший сценарий за это
+# время, вернётся в чистое состояние при следующем взаимодействии.
+FSM_TTL = 24 * 3600
+
+
 class SQLiteStorage(BaseStorage):
-    """Персистентное хранилище FSM на SQLite."""
+    """Персистентное хранилище FSM на SQLite с TTL состояний."""
 
     def __init__(self, db_path: Union[str, Path]):
         self.db_path = str(db_path)
@@ -40,9 +46,20 @@ class SQLiteStorage(BaseStorage):
                 CREATE TABLE IF NOT EXISTS fsm (
                     key TEXT PRIMARY KEY,
                     state TEXT,
-                    data TEXT
+                    data TEXT,
+                    updated_at REAL
                 )
             """)
+            # Миграция старой таблицы без updated_at
+            try:
+                await self._conn.execute("ALTER TABLE fsm ADD COLUMN updated_at REAL")
+            except Exception:
+                pass  # колонка уже есть
+            # Чистим просроченные состояния при старте (TTL)
+            await self._conn.execute(
+                "DELETE FROM fsm WHERE updated_at IS NOT NULL AND updated_at < ?",
+                (time.time() - FSM_TTL,)
+            )
             await self._conn.commit()
         return self._conn
 
@@ -71,10 +88,11 @@ class SQLiteStorage(BaseStorage):
             # UPSERT: сохраняем state, не затирая существующие data
             await conn.execute(
                 """
-                INSERT INTO fsm (key, state, data) VALUES (?, ?, NULL)
-                ON CONFLICT(key) DO UPDATE SET state = excluded.state
+                INSERT INTO fsm (key, state, data, updated_at) VALUES (?, ?, NULL, ?)
+                ON CONFLICT(key) DO UPDATE SET state = excluded.state,
+                    updated_at = excluded.updated_at
                 """,
-                (skey, s),
+                (skey, s, time.time()),
             )
             await conn.commit()
 
@@ -82,8 +100,12 @@ class SQLiteStorage(BaseStorage):
         skey = self._build_key(key)
         async with self._lock:
             conn = await self._get_conn()
-            async with conn.execute("SELECT state FROM fsm WHERE key = ?", (skey,)) as cur:
+            async with conn.execute(
+                "SELECT state, updated_at FROM fsm WHERE key = ?", (skey,)
+            ) as cur:
                 row = await cur.fetchone()
+                if row and row[1] is not None and (time.time() - row[1]) > FSM_TTL:
+                    return None  # состояние просрочено — считаем отсутствующим
                 return row[0] if row else None
 
     async def set_data(self, key: StorageKey, data: Dict[str, Any]) -> None:
@@ -93,10 +115,11 @@ class SQLiteStorage(BaseStorage):
             conn = await self._get_conn()
             await conn.execute(
                 """
-                INSERT INTO fsm (key, state, data) VALUES (?, NULL, ?)
-                ON CONFLICT(key) DO UPDATE SET data = excluded.data
+                INSERT INTO fsm (key, state, data, updated_at) VALUES (?, NULL, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET data = excluded.data,
+                    updated_at = excluded.updated_at
                 """,
-                (skey, payload),
+                (skey, payload, time.time()),
             )
             await conn.commit()
 
@@ -104,8 +127,12 @@ class SQLiteStorage(BaseStorage):
         skey = self._build_key(key)
         async with self._lock:
             conn = await self._get_conn()
-            async with conn.execute("SELECT data FROM fsm WHERE key = ?", (skey,)) as cur:
+            async with conn.execute(
+                "SELECT data, updated_at FROM fsm WHERE key = ?", (skey,)
+            ) as cur:
                 row = await cur.fetchone()
+                if row and row[1] is not None and (time.time() - row[1]) > FSM_TTL:
+                    return {}  # данные просрочены — начинаем сценарий заново
         if not row or not row[0]:
             return {}
         try:

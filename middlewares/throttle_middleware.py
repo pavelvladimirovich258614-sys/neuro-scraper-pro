@@ -23,6 +23,9 @@ THROTTLE_WINDOW = 0.7
 class CallbackThrottleMiddleware(BaseMiddleware):
     """Гасит повторные идентичные callback'и в пределах окна."""
 
+    # Максимальный размер кэша: при превышении чистим устаревшие записи
+    MAX_CACHE_SIZE = 10000
+
     def __init__(self):
         # {user_id: (last_callback_data, last_timestamp)}
         self._last: Dict[int, tuple] = {}
@@ -48,4 +51,19 @@ class CallbackThrottleMiddleware(BaseMiddleware):
 
             self._last[user_id] = (event.data, now)
 
+            # Не даём кэшу расти бесконечно
+            if len(self._last) > self.MAX_CACHE_SIZE:
+                self._cleanup(now)
+
         return await handler(event, data)
+
+    def _cleanup(self, now: float) -> None:
+        """Удалить записи, чьё окно подавления давно истекло."""
+        self._last = {
+            uid: entry
+            for uid, entry in self._last.items()
+            if (now - entry[1]) < THROTTLE_WINDOW * 10
+        }
+        # Если всё ещё слишком много (массовый трафик) — просто сбрасываем
+        if len(self._last) > self.MAX_CACHE_SIZE:
+            self._last.clear()

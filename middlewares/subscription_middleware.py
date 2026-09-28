@@ -54,6 +54,13 @@ async def is_user_subscribed(bot: Bot, user_id: int, force: bool = False) -> boo
             return cached_result
 
     is_subscribed = await _check_subscription_api(bot, user_id)
+
+    # Не даём кэшу расти бесконечно (защита от утечки памяти)
+    if len(_subscription_cache) > 50000:
+        cutoff = now - CACHE_TTL
+        stale = [uid for uid, (_, ts) in _subscription_cache.items() if ts < cutoff]
+        for uid in stale:
+            del _subscription_cache[uid]
     _subscription_cache[user_id] = (is_subscribed, now)
     # Держим БД-кэш в синхроне с реальным статусом
     await db.set_subscription_verified(user_id, is_subscribed)

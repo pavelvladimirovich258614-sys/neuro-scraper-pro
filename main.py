@@ -8,6 +8,7 @@ import logging
 import sys
 from pathlib import Path
 from datetime import datetime, time as dt_time
+from logging.handlers import TimedRotatingFileHandler
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -26,7 +27,8 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler('bot.log', encoding='utf-8')
+        # Ротация логов: новый файл в полночь, храним 14 дней
+        TimedRotatingFileHandler('bot.log', when='midnight', backupCount=14, encoding='utf-8')
     ]
 )
 logger = logging.getLogger(__name__)
@@ -219,6 +221,9 @@ async def main():
         )
     except Exception as e:
         logger.error(f"Error during polling: {e}", exc_info=True)
+        # Аварийное завершение должно давать ненулевой код возврата:
+        # иначе systemd (Restart=always) не перезапустит упавший процесс
+        raise
     finally:
         await storage.close()
         await bot.session.close()

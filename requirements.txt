@@ -1,8 +1,8 @@
 # Telegram Bot Framework
-aiogram==3.10.0
+aiogram==3.31.0
 
 # Telegram Client for Parsing
-telethon==1.36.0
+telethon==1.45.0
 
 # Data Processing
 pandas==2.2.0
